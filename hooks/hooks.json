@@ -1,0 +1,16 @@
+{
+  "rex-agy-subagent": {
+    "PostToolUse": [
+      {
+        "matcher": "invoke_subagent",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "~/.local/bin/agy-subagent-hook",
+            "timeout": 5
+          }
+        ]
+      }
+    ]
+  }
+}

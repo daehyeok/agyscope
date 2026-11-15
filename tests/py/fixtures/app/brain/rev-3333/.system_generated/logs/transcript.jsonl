@@ -1,0 +1,4 @@
+{"type": "SYSTEM_MESSAGE", "status": "DONE", "created_at": "2026-01-01T00:00:00Z", "content": "<SYSTEM_MESSAGE>sender=root-0000 content=review</SYSTEM_MESSAGE>"}
+{"type": "PLANNER_RESPONSE", "status": "DONE", "created_at": "2026-01-01T00:00:00Z", "content": "", "tool_calls": [{"name": "edit_file", "args": {"Path": "/repo/foo.py", "Target": "a\nb\nc", "Replacement": "d"}}]}
+{"type": "GENERIC", "status": "DONE", "created_at": "2026-01-01T00:00:01Z", "content": "ok"}
+{"type": "PLANNER_RESPONSE", "status": "DONE", "created_at": "2026-01-01T00:00:00Z", "content": "No issues found.", "tool_calls": []}

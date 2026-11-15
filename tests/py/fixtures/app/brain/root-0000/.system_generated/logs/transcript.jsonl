@@ -1,0 +1,8 @@
+{"type": "USER_INPUT", "status": "DONE", "content": "plan and review"}
+{"type": "PLANNER_RESPONSE", "status": "DONE", "created_at": "2026-01-01T00:00:00Z", "content": "", "tool_calls": [{"name": "invoke_subagent", "args": {"Role": "Planner", "TypeName": "worker", "Prompt": "do it"}}]}
+{"type": "GENERIC", "status": "DONE", "created_at": "2026-01-01T00:00:01Z", "content": "Created At: x\nCompleted At: y\nCreated the following subagent:\n{\n  \"conversationId\": \"plan-1111\"\n}"}
+{"type": "PLANNER_RESPONSE", "status": "DONE", "created_at": "2026-01-01T00:00:00Z", "content": "", "tool_calls": [{"name": "invoke_subagent", "args": {"Role": "Broken", "TypeName": "worker", "Prompt": "do it"}}]}
+{"type": "GENERIC", "status": "ERROR", "created_at": "2026-01-01T00:00:01Z", "content": "invoke failed: quota"}
+{"type": "PLANNER_RESPONSE", "status": "DONE", "created_at": "2026-01-01T00:01:00Z", "content": "", "tool_calls": [{"name": "invoke_subagent", "args": {"Role": "Reviewer", "TypeName": "reviewer", "Prompt": "do it"}}]}
+{"type": "GENERIC", "status": "DONE", "created_at": "2026-01-01T00:01:01Z", "content": "Created At: x\nCompleted At: y\nCreated the following subagent:\n{\n  \"conversationId\": \"rev-3333\"\n}"}
+{"type": "PLANNER_RESPONSE", "status": "DONE", "created_at": "2026-01-01T00:00:00Z", "content": "Both started.", "tool_calls": []}

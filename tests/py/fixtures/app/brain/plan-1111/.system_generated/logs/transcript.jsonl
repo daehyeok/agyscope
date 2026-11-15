@@ -1,0 +1,6 @@
+{"type": "SYSTEM_MESSAGE", "status": "DONE", "created_at": "2026-01-01T00:00:00Z", "content": "<SYSTEM_MESSAGE>sender=root-0000 content=make a plan</SYSTEM_MESSAGE>"}
+{"type": "PLANNER_RESPONSE", "status": "DONE", "created_at": "2026-01-01T00:00:00Z", "content": "", "tool_calls": [{"name": "read_file", "args": {"Path": "/repo/BUILD", "StartLine": 1, "EndLine": 674}}]}
+{"type": "GENERIC", "status": "DONE", "created_at": "2026-01-01T00:00:01Z", "content": "file contents"}
+{"type": "PLANNER_RESPONSE", "status": "DONE", "created_at": "2026-01-01T00:00:30Z", "content": "", "tool_calls": [{"name": "invoke_subagent", "args": {"Role": "Checker", "TypeName": "checker", "Prompt": "do it"}}]}
+{"type": "GENERIC", "status": "DONE", "created_at": "2026-01-01T00:00:31Z", "content": "Created At: x\nCompleted At: y\nCreated the following subagent:\n{\n  \"conversationId\": \"chk-2222\"\n}"}
+{"type": "PLANNER_RESPONSE", "status": "DONE", "created_at": "2026-01-01T00:00:00Z", "content": "Plan written.\nDetails follow.", "tool_calls": []}

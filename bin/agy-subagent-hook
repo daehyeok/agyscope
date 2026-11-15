@@ -1,0 +1,20 @@
+#!/usr/bin/env python3
+"""agy-subagent-hook: PostToolUse hook for invoke_subagent (see hooks/hooks.json).
+
+Prints {} and exits 0 at once, always. Inside Rex it records the pane's root
+conversation and, unless auto_open is false, opens the agy-subagent panel in the
+pane's window (without focus) when there is none yet. See README.md.
+"""
+
+import os
+import sys
+
+try:
+    sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.realpath(__file__))))
+    from agy_subagent_py import hook
+except Exception:  # never fail the agent loop, even if the install is broken
+    sys.stdout.write("{}\n")
+    sys.exit(0)
+
+if __name__ == "__main__":
+    sys.exit(hook.main())

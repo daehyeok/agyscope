@@ -1,0 +1,103 @@
+#!/usr/bin/env python3
+"""agy-subagent: read-only panel listing the subagents of an Antigravity agent session.
+
+    agy-subagent [--pid PID] [--block BLOCK] [--conversation ID] [settings...]
+                                      curses panel (refreshes every second)
+    agy-subagent --once ...           print the list once as plain text
+    agy-subagent --view CHILD ...     print one subagent's view, fully unfolded (CHILD may be a prefix)
+
+Which conversation: --pid (the agent process; followed through the presence lock it
+holds open, found with lsof or /proc), then the block pointer the hook writes for
+--block, then --conversation. The data directory comes from that lock (or the
+pointer) when there is one; --app-dir and the other settings are the fallback.
+
+Settings (flags override AGY_SUBAGENT_* variables, which override the config file):
+    --app-dir DIR          agent data directory (default ~/.gemini/antigravity-cli)
+    --keymap emacs|vim     panel keys (default emacs)
+    --keys-json JSON       extra keys: {"down": ["J"], ...}
+    --pager-json JSON      pager argv: ["bat", "--paging=always"]
+
+See README.md for the keys and the config file.
+"""
+
+import argparse
+import json
+import os
+import sys
+
+HERE = os.path.dirname(os.path.realpath(__file__))
+sys.path.insert(0, os.path.dirname(HERE))
+
+from agy_subagent_py import config, discovery, resolve  # noqa: E402
+
+
+def parse(argv):
+    p = argparse.ArgumentParser(prog="agy-subagent", add_help=True)
+    p.add_argument("--pid", type=int)
+    p.add_argument("--block")
+    p.add_argument("--conversation")
+    p.add_argument("--once", action="store_true")
+    p.add_argument("--view", metavar="CHILD")
+    p.add_argument("--app-dir")
+    p.add_argument("--keymap")
+    p.add_argument("--keys-json")
+    p.add_argument("--pager-json")
+    return p.parse_args(argv)
+
+
+def flags_of(args):
+    warnings = []
+    flags = {"app_dir": args.app_dir, "keymap": args.keymap}
+    for name, raw in (("keys", args.keys_json), ("pager", args.pager_json)):
+        if raw is None:
+            continue
+        try:
+            flags[name] = json.loads(raw)
+        except ValueError:
+            warnings.append("flag --%s-json must be JSON; ignored" % name)
+    return flags, warnings
+
+
+def main(argv):
+    args = parse(argv)
+    flags, warnings = flags_of(args)
+    settings, more = config.load(flags)
+    warnings += more
+    resolver = resolve.Resolver(settings["app_dir"], pid=args.pid, block=args.block,
+                                conversation=args.conversation)
+    tree = discovery.Tree(settings["app_dir"])
+
+    if args.once or args.view:
+        for w in warnings:
+            sys.stderr.write("agy-subagent: %s\n" % w)
+        root = resolver.current()
+        if not root:
+            print("No conversation found for this pane.")
+            return 1
+        tree.set_root(root, resolver.app_dir)
+        groups = tree.rows()
+        if args.view:
+            for row in discovery.flat(groups):
+                if row["id"].startswith(args.view):
+                    from agy_subagent_py.ui import plain
+                    print("\n".join(plain(tree, row)))
+                    return 0
+            sys.stderr.write("agy-subagent: no subagent %s under %s\n" % (args.view, root))
+            return 1
+        if not discovery.flat(groups):
+            print("No subagents yet.")
+        for name, rows in groups:
+            if rows:
+                print(name)
+                for row in rows:
+                    print(discovery.row_text(row))
+        return 0
+
+    from agy_subagent_py import hook, ui
+    if ui.run(tree, resolver, settings, warnings) and args.block:
+        hook.focus_block(args.block)
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(main(sys.argv[1:]))
