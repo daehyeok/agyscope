@@ -1,3 +1,4 @@
+import io
 import json
 import os
 import stat
@@ -6,10 +7,11 @@ import sys
 import tempfile
 import time
 import unittest
+from unittest import mock
 
 import helpers
 
-HOOK = os.path.join(helpers.REPO, "bin", "agy-subagent-hook")
+HOOK = [sys.executable, "-m", "agyscope.integrations.rex.hook"]
 
 # Fake rex: `session inspect S --json` prints a view of one window holding block:src
 # plus any layers created so far; `api call session.new_layer -` records the request
@@ -75,7 +77,7 @@ class HookTest(unittest.TestCase):
 
     def run_hook(self, data, env=None):
         t0 = time.time()
-        p = subprocess.run([sys.executable, HOOK], input=data.encode(), stdout=subprocess.PIPE,
+        p = subprocess.run(HOOK, input=data.encode(), stdout=subprocess.PIPE,
                            env=env or self.env, timeout=5)
         took = time.time() - t0
         self.assertEqual(p.returncode, 0)
@@ -96,7 +98,7 @@ class HookTest(unittest.TestCase):
         return last
 
     def pointer(self):
-        p = os.path.join(self.tmp, "state", "rex-agy-subagent", "blocks", "block:src")
+        p = os.path.join(self.tmp, "state", "agyscope", "blocks", "block:src")
         if not os.path.exists(p):
             return None
         with open(p) as f:
@@ -117,27 +119,39 @@ class HookTest(unittest.TestCase):
         self.assertEqual(req["window_id"], "w1")
         self.assertFalse(req["focus"])
         blk = req["layout"]["block"]
-        self.assertEqual(blk["label"], "agy-subagent:block:src")
-        self.assertEqual(blk["options"]["command"][1:], ["--conversation", "root-1", "--block", "block:src"])
-        self.assertTrue(blk["options"]["command"][0].endswith("/bin/agy-subagent"))
+        self.assertEqual(blk["label"], "agyscope:block:src")
+        # argv0 is hook.py, which has no agyscope sibling, so the bare command stays bare
+        self.assertEqual(blk["options"]["command"], ["agyscope", "--conversation", "root-1", "--rex-block", "block:src"])
         self.assertIs(blk["options"]["interactive"], True)
         self.assertEqual(self.pointer(), "root-1")
         # a later start finds the panel and opens nothing
         self.run_hook(payload())
         self.assertEqual(len(self.calls()), 1)
 
-    def test_interactive_false_from_config(self):
-        d = os.path.join(self.tmp, "config", "rex-agy-subagent")
-        os.makedirs(d)
+    def write_config(self, data):
+        d = os.path.join(self.tmp, "config", "agyscope")
+        os.makedirs(d, exist_ok=True)
         with open(os.path.join(d, "config.json"), "w") as f:
-            json.dump({"interactive": False}, f)
+            json.dump(data, f)
+
+    def test_command_from_config(self):
+        self.write_config({"command": ["/opt/a/agyscope", "--keymap", "vim"]})
+        self.run_hook(payload())
+        calls = self.calls()
+        self.assertEqual(len(calls), 1)
+        self.assertEqual(calls[0]["layout"]["block"]["options"]["command"],
+                         ["/opt/a/agyscope", "--keymap", "vim", "--conversation", "root-1",
+                          "--rex-block", "block:src"])
+
+    def test_interactive_false_from_config(self):
+        self.write_config({"interactive": False})
         self.run_hook(payload())
         calls = self.calls()
         self.assertEqual(len(calls), 1)
         self.assertIs(calls[0]["layout"]["block"]["options"]["interactive"], False)
 
     def test_parallel_starts_open_one(self):
-        procs = [subprocess.Popen([sys.executable, HOOK], stdin=subprocess.PIPE, stdout=subprocess.PIPE,
+        procs = [subprocess.Popen(HOOK, stdin=subprocess.PIPE, stdout=subprocess.PIPE,
                                   env=self.env) for _ in range(3)]
         for p in procs:
             out, _ = p.communicate(payload().encode(), timeout=5)
@@ -163,8 +177,8 @@ class HookTest(unittest.TestCase):
         self.assertEqual(self.calls(0.5), [])
 
     def test_auto_open_false(self):
-        env = dict(self.env, AGY_SUBAGENT_AUTO_OPEN="false")
-        self.run_hook(payload(), env)
+        self.write_config({"auto_open": False})
+        self.run_hook(payload())
         self.assertEqual(self.calls(0.5), [])
         self.assertEqual(self.pointer(), "root-1")
 
@@ -173,14 +187,15 @@ class HookTest(unittest.TestCase):
         self.run_hook(payload(), env)
         self.assertEqual(self.pointer(), "root-1")
 
-    def test_broken_install_still_answers(self):
-        d = tempfile.mkdtemp()
-        lonely = os.path.join(d, "agy-subagent-hook")
-        with open(HOOK) as src, open(lonely, "w") as dst:
-            dst.write(src.read())
-        p = subprocess.run([sys.executable, lonely], input=payload().encode(), stdout=subprocess.PIPE,
-                           env=self.env, timeout=5)
-        self.assertEqual((p.returncode, p.stdout.decode().strip()), (0, "{}"))
+    def test_config_failure_still_answers(self):
+        from agyscope.integrations.rex import hook
+        out = io.StringIO()
+        with mock.patch("agyscope.config.load", side_effect=RuntimeError("boom")), \
+                mock.patch.object(hook, "detach") as detach:
+            rc = hook.main(io.StringIO(payload()), out, dict(self.env))
+        self.assertEqual(rc, 0)
+        self.assertEqual(out.getvalue(), "{}\n")
+        detach.assert_not_called()
 
     # Payloads without rootConversationId: the hook also runs for a subagent's own
     # invoke_subagent, with conversationId set to that subagent. Only roots hold a lock.
@@ -195,7 +210,7 @@ class HookTest(unittest.TestCase):
                                 "artifactDirectoryPath": os.path.join(app, "brain", conv), "error": ""})
 
     def raw_pointer(self):
-        with open(os.path.join(self.tmp, "state", "rex-agy-subagent", "blocks", "block:src")) as f:
+        with open(os.path.join(self.tmp, "state", "agyscope", "blocks", "block:src")) as f:
             return f.read().splitlines()
 
     def test_root_without_root_id(self):
@@ -204,7 +219,7 @@ class HookTest(unittest.TestCase):
         calls = self.calls()
         self.assertEqual(len(calls), 1)
         self.assertEqual(calls[0]["layout"]["block"]["options"]["command"][1:],
-                         ["--conversation", "root-9", "--block", "block:src", "--app-dir", app])
+                         ["--conversation", "root-9", "--rex-block", "block:src", "--app-dir", app])
         self.assertEqual(self.raw_pointer(), ["root-9", app])
 
     def test_nested_start_keeps_root(self):
@@ -222,7 +237,7 @@ class HookTest(unittest.TestCase):
         self.assertIsNone(self.pointer())
 
     def test_app_dir_from_artifact_path(self):
-        from agy_subagent_py import hook
+        from agyscope.integrations.rex import hook
         self.assertEqual(hook.app_dir_of({"artifactDirectoryPath": "/d/x/brain/c1"}), "/d/x")
         self.assertEqual(hook.app_dir_of({"transcriptPath": "file:///d/y/brain/c/.system_generated/logs/t.jsonl"}),
                          "/d/y")
@@ -230,9 +245,9 @@ class HookTest(unittest.TestCase):
         self.assertIsNone(hook.app_dir_of({}))
 
     def test_rex_cli_macos_bundle_fallback(self):
-        from agy_subagent_py import hook
+        from agyscope.integrations.rex import focus
         env = {"HOME": self.tmp, "PATH": "/nonexistent"}
-        self.assertEqual(hook.rex_cli(env), "rex")
+        self.assertEqual(focus.rex_cli(env), "rex")
         bundle_bin = os.path.join(self.tmp, "Library", "Application Support",
                                   "com.superlogical.rex", "RexServer", "Versions",
                                   "Current", "Rex Server.app", "Contents", "MacOS", "rex")
@@ -240,30 +255,88 @@ class HookTest(unittest.TestCase):
         with open(bundle_bin, "w") as f:
             f.write("#!/bin/sh\nexit 0\n")
         os.chmod(bundle_bin, os.stat(bundle_bin).st_mode | stat.S_IEXEC)
-        self.assertEqual(hook.rex_cli(env), bundle_bin)
+        self.assertEqual(focus.rex_cli(env), bundle_bin)
 
     def test_focus_block_guards(self):
-        from agy_subagent_py import hook
-        self.assertTrue(hook.focus_block("block:src", self.env))
+        from agyscope.integrations.rex import focus
+        self.assertTrue(focus.focus_block("block:src", self.env))
         self.assertEqual(self.focus_calls(), ["block:src"])
 
-        self.assertFalse(hook.focus_block(None, self.env))
+        self.assertFalse(focus.focus_block(None, self.env))
         self.assertEqual(self.focus_calls(), ["block:src"])
-        self.assertFalse(hook.focus_block("", self.env))
+        self.assertFalse(focus.focus_block("", self.env))
         self.assertEqual(self.focus_calls(), ["block:src"])
 
         env_no_session = dict(self.env)
         del env_no_session["REX_SESSION"]
-        self.assertFalse(hook.focus_block("block:src", env_no_session))
+        self.assertFalse(focus.focus_block("block:src", env_no_session))
         self.assertEqual(self.focus_calls(), ["block:src"])
 
         env_missing_rex = dict(self.env, REX_BIN_DIR=os.path.join(self.tmp, "nowhere"), PATH="/nonexistent")
-        self.assertFalse(hook.focus_block("block:src", env_missing_rex))
+        self.assertFalse(focus.focus_block("block:src", env_missing_rex))
         self.assertEqual(self.focus_calls(), ["block:src"])
 
     # The panel's close/focus and header tests live with the Textual app now:
-    # test_app (test_close_returns_true, test_ctrl_c_returns_false, test_focus_on_close),
-    # test_launcher (uv dispatch) and test_widgets (test_header_model_badge).
+    # test_app (RunTest: on_close only after `close`) and test_widgets (test_header_model_badge).
+
+
+class HookConfigTest(unittest.TestCase):
+    def test_settings_keys_are_integration_keys(self):
+        from agyscope import config
+        from agyscope.integrations.rex import hook
+        spec = hook.settings_spec()
+        self.assertEqual(set(spec), {"bounds", "auto_open", "interactive", "command"})
+        self.assertLessEqual(set(spec), config.INTEGRATION_KEYS)
+        self.assertEqual(spec["command"][0], ["agyscope"])
+
+    def test_check_bounds(self):
+        from agyscope.integrations.rex import hook
+        self.assertEqual(hook._check_bounds([0, 0, 1, 1]), [0.0, 0.0, 1.0, 1.0])
+        for bad in ([0, 0, 1], [True, 0, 0, 0], [0, 0, 2, 0], "x", None):
+            with self.assertRaises(ValueError):
+                hook._check_bounds(bad)
+
+    def test_panel_command_resolves_sibling(self):
+        from agyscope.integrations.rex import hook
+        tmp = tempfile.mkdtemp()
+        exe = os.path.join(tmp, "agyscope")
+        with open(exe, "w") as f:
+            f.write("#!/bin/sh\n")
+        os.chmod(exe, 0o755)
+        real_hook = os.path.join(tmp, "agyscope-rex-hook")
+        open(real_hook, "w").close()
+        os.makedirs(os.path.join(tmp, "link"))
+        link = os.path.join(tmp, "link", "agyscope-rex-hook")
+        os.symlink(real_hook, link)
+        self.assertEqual(hook.panel_command(["agyscope", "--x"], link), [os.path.realpath(exe), "--x"])
+        # non-bare commands and a missing sibling stay unchanged
+        self.assertEqual(hook.panel_command(["/opt/agyscope"], link), ["/opt/agyscope"])
+        self.assertEqual(hook.panel_command(["other"], link), ["other"])
+        os.chmod(exe, 0o644)  # not executable
+        self.assertEqual(hook.panel_command(["agyscope"], link), ["agyscope"])
+        cmd = ["agyscope"]
+        self.assertIsNot(hook.panel_command(cmd, link), cmd)
+
+    def test_hook_module_imports_stdlib_only(self):
+        code = "import sys, agyscope.integrations.rex.hook; print('agyscope.config' in sys.modules)"
+        proc = subprocess.run([sys.executable, "-c", code], stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+                              universal_newlines=True, timeout=60)
+        self.assertEqual(proc.returncode, 0, proc.stderr)
+        self.assertEqual(proc.stdout.strip(), "False")
+
+    @unittest.skipUnless(os.path.exists(os.path.join(os.path.dirname(sys.executable), "agyscope-rex-hook")),
+                         "agyscope-rex-hook entry point not installed")
+    def test_entry_point_empty_stdin(self):
+        exe = os.path.join(os.path.dirname(sys.executable), "agyscope-rex-hook")
+        proc = subprocess.run([exe], input=b"", stdout=subprocess.PIPE, timeout=10)
+        self.assertEqual((proc.returncode, proc.stdout.decode().strip()), (0, "{}"))
+
+    def test_sample_hooks_json(self):
+        with open(os.path.join(helpers.REPO, "integrations", "rex", "hooks.json")) as f:
+            data = json.load(f)
+        self.assertEqual(list(data), ["agyscope"])
+        command = data["agyscope"]["PostToolUse"][0]["hooks"][0]["command"]
+        self.assertTrue(command.endswith("agyscope-rex-hook"), command)
 
 
 if __name__ == "__main__":

@@ -1,4 +1,4 @@
--- agy_subagent/rexapi.lua: the Rex calls the action needs. Runs in the Rex config
+-- agyscope/rexapi.lua: the Rex calls the action needs. Runs in the Rex config
 -- (client side). A tab may belong to a remote host: each call is tried on the local
 -- server first and then on the tab's server (ctx.server), re-attaching once if needed.
 

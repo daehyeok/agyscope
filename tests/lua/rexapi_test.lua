@@ -1,9 +1,9 @@
--- Tests for agy_subagent.rexapi.
+-- Tests for agyscope.rexapi.
 -- Run from anywhere: rex do path/to/tests/lua/rexapi_test.lua
 
 local dir = debug.getinfo(1, "S").source:match("^@?(.*[/\\])") or "./"
 local t = dofile(dir .. "harness.lua")(dir)
-local rexapi = require "agy_subagent.rexapi"
+local rexapi = require "agyscope.rexapi"
 
 -- rex_cli tests
 local env_bin = { REX_BIN_DIR = "/custom/bin", HOME = "/Users/test" }

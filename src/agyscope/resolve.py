@@ -5,14 +5,14 @@
      The lock names the conversation, and the directory holding presence/ is the data
      directory. Re-checked every RECHECK seconds, so resuming another conversation in
      the same process switches the panel. A dead pid keeps the last answer.
-  2. the block pointer, $XDG_STATE_HOME/rex-agy-subagent/blocks/<block>, which the hook
-     rewrites on every subagent start with that pane's latest root conversation (line 1)
-     and, when it knew it, the data directory (line 2).
+  2. the fallback, e.g. the Rex block pointer, which the hook rewrites on every subagent
+     start with that pane's latest root conversation and, when it knew it, the data
+     directory. It returns (conversation, data directory), either may be None.
   3. --conversation ID (from the hook).
   4. the last answer, or None.
 
 Resolver.app_dir is the data directory for the current answer: the lock's or the
-pointer's when they gave one, else the configured one.
+fallback's when they gave one, else the configured one.
 """
 
 import os
@@ -24,44 +24,6 @@ RECHECK = 3.0
 LSOF_TIMEOUT = 2.0
 PROC = "/proc"
 LOCK = re.compile(r"^(.+)\.lock$")
-
-
-def state_dir(env=None):
-    env = os.environ if env is None else env
-    base = env.get("XDG_STATE_HOME") or os.path.join(os.path.expanduser("~"), ".local", "state")
-    return os.path.join(base, "rex-agy-subagent")
-
-
-def pointer_path(block, env=None):
-    return os.path.join(state_dir(env), "blocks", block.replace("/", "_"))
-
-
-def read_pointer_full(block, env=None):
-    """(conversation, app_dir or None), or (None, None)."""
-    try:
-        with open(pointer_path(block, env), encoding="utf-8") as f:
-            lines = f.read().splitlines()
-    except OSError:
-        return None, None
-    conv = lines[0].strip() if lines else ""
-    app_dir = lines[1].strip() if len(lines) > 1 else ""
-    return (conv or None), (app_dir or None) if conv else None
-
-
-def read_pointer(block, env=None):
-    return read_pointer_full(block, env)[0]
-
-
-def write_pointer(block, conv_id, env=None, app_dir=None):
-    """Atomically records conv_id (and app_dir, if known) as the block's latest root conversation."""
-    path = pointer_path(block, env)
-    os.makedirs(os.path.dirname(path), exist_ok=True)
-    tmp = "%s.%d.tmp" % (path, os.getpid())
-    with open(tmp, "w", encoding="utf-8") as f:
-        f.write(conv_id + "\n")
-        if app_dir:
-            f.write(app_dir + "\n")
-    os.replace(tmp, path)
 
 
 def pid_alive(pid):
@@ -140,14 +102,16 @@ def presence_conversation(pid, app_dir=None, lsof="lsof", proc=PROC):
 
 
 class Resolver:
-    def __init__(self, app_dir, pid=None, block=None, conversation=None, env=None,
+    """fallback: optional callable returning (conversation, app_dir), either may be None;
+    asked when the pid gives no answer (e.g. the Rex block pointer)."""
+
+    def __init__(self, app_dir, pid=None, conversation=None, fallback=None,
                  lsof="lsof", clock=time.monotonic, proc=PROC):
         self.default_app_dir = app_dir
         self.app_dir = app_dir
         self.pid = pid
-        self.block = block
         self.conversation = conversation
-        self.env = env
+        self.fallback = fallback
         self.lsof = lsof
         self.proc = proc
         self.clock = clock
@@ -161,8 +125,8 @@ class Resolver:
             found, app = presence_lock(open_files(self.pid, self.lsof, self.proc), self.default_app_dir)
             if not found and self.last and not pid_alive(self.pid):
                 return self.last
-        if not found and self.block:
-            found, app = read_pointer_full(self.block, self.env)
+        if not found and self.fallback:
+            found, app = self.fallback()
         if not found:
             found, app = self.conversation or self.last, None
             if found and found == self.last:

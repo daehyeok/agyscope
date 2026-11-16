@@ -5,9 +5,9 @@ import unittest
 
 import helpers  # noqa: F401
 import make_fixtures as fx
-from agy_subagent_py import discovery
-from agy_subagent_py.transcript import col_width
-from agy_subagent_py.viewstate import ViewState
+from agyscope import discovery
+from agyscope.transcript import col_width
+from agyscope.viewstate import ViewState
 
 try:
     from textual import events
@@ -21,7 +21,7 @@ if HAVE_TEXTUAL:
     # outside the try: a missing widget must fail, not skip
     from textual.geometry import Region
 
-    from agy_subagent_py.widgets import (COLS, MODEL_MIN, STYLES, TEXT_MIN, StepView, SubagentTree,
+    from agyscope.widgets import (COLS, MODEL_MIN, STYLES, TEXT_MIN, StepView, SubagentTree,
                                          header_columns, row_columns, visible_cols)
 
 SIZE = (80, 12)

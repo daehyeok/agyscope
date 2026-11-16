@@ -4,7 +4,8 @@ import tempfile
 import unittest
 
 import helpers  # noqa: F401
-from agy_subagent_py import resolve
+from agyscope import resolve
+from agyscope.integrations.rex import pointer
 
 
 class ResolveTest(unittest.TestCase):
@@ -29,7 +30,7 @@ class ResolveTest(unittest.TestCase):
 
     def test_pid_switches_conversation(self):
         clock = [0.0]
-        r = resolve.Resolver(self.app, pid=os.getpid(), env=self.env, lsof=self.lsof, clock=lambda: clock[0])
+        r = resolve.Resolver(self.app, pid=os.getpid(), lsof=self.lsof, clock=lambda: clock[0])
         self.holds("conv-a")
         self.assertEqual(r.current(), "conv-a")
         self.holds("conv-b")
@@ -38,30 +39,39 @@ class ResolveTest(unittest.TestCase):
         clock[0] = 3.5
         self.assertEqual(r.current(), "conv-b")
 
-    def test_missing_lsof_uses_pointer(self):
-        resolve.write_pointer("block:1", "conv-p", self.env)
-        r = resolve.Resolver(self.app, pid=os.getpid(), block="block:1", env=self.env,
+    def test_missing_lsof_uses_fallback(self):
+        r = resolve.Resolver(self.app, pid=os.getpid(), fallback=lambda: ("conv-p", None),
                              lsof=os.path.join(self.tmp, "no-lsof"))
         self.assertEqual(r.resolve(), "conv-p")
 
     def test_dead_pid_keeps_last(self):
         self.holds("conv-a")
-        r = resolve.Resolver(self.app, pid=os.getpid(), env=self.env, lsof=self.lsof)
+        r = resolve.Resolver(self.app, pid=os.getpid(), lsof=self.lsof)
         self.assertEqual(r.resolve(), "conv-a")
         r.last = "conv-a"
         r.pid = 2 ** 22 + 12345  # almost surely not running
-        resolve.write_pointer("b", "other", self.env)
-        r.block = "b"
+        r.fallback = lambda: ("other", None)
         self.assertEqual(r.resolve(), "conv-a")
 
-    def test_conversation_flag_and_pointer(self):
-        r = resolve.Resolver(self.app, block="block:2", conversation="from-hook", env=self.env)
+    def test_conversation_flag_and_fallback(self):
+        value = [(None, None)]
+        r = resolve.Resolver(self.app, fallback=lambda: value[0], conversation="from-hook")
         self.assertEqual(r.resolve(), "from-hook")
-        resolve.write_pointer("block:2", "newer", self.env)
+        value[0] = ("newer", None)
         self.assertEqual(r.resolve(), "newer")
 
+    def test_fallback_none_value(self):
+        r = resolve.Resolver(self.app, fallback=lambda: (None, None), conversation="conv-c")
+        self.assertEqual(r.resolve(), "conv-c")
+        self.assertEqual(r.app_dir, self.app)
+
+    def test_no_block_attributes(self):
+        r = resolve.Resolver(self.app)
+        self.assertFalse(hasattr(r, "block"))
+        self.assertFalse(hasattr(r, "env"))
+
     def test_nothing(self):
-        self.assertIsNone(resolve.Resolver(self.app, env=self.env).resolve())
+        self.assertIsNone(resolve.Resolver(self.app).resolve())
 
     def fake_proc(self, pid, targets):
         proc = os.path.join(self.tmp, "proc")
@@ -74,7 +84,7 @@ class ResolveTest(unittest.TestCase):
     def test_proc_fallback_without_lsof(self):
         other = os.path.join(self.tmp, "data", "agent")
         proc = self.fake_proc(os.getpid(), ["/dev/null", os.path.join(other, "presence", "conv-p.lock")])
-        r = resolve.Resolver(self.app, pid=os.getpid(), env=self.env,
+        r = resolve.Resolver(self.app, pid=os.getpid(),
                              lsof=os.path.join(self.tmp, "no-lsof"), proc=proc)
         self.assertEqual(r.resolve(), "conv-p")
         self.assertEqual(r.app_dir, other)
@@ -91,7 +101,7 @@ class ResolveTest(unittest.TestCase):
         other = os.path.join(self.tmp, "elsewhere")
         with open(self.answer, "w") as f:
             f.write("n%s/presence/conv-x.lock\n" % other)
-        r = resolve.Resolver(self.app, pid=os.getpid(), env=self.env, lsof=self.lsof)
+        r = resolve.Resolver(self.app, pid=os.getpid(), lsof=self.lsof)
         self.assertEqual(r.resolve(), "conv-x")
         self.assertEqual(r.app_dir, other)
 
@@ -104,18 +114,20 @@ class ResolveTest(unittest.TestCase):
     def test_not_a_presence_lock(self):
         self.assertEqual(resolve.presence_lock(["/x/locks/conv.lock", "/x/presence/notalock"]), (None, None))
 
+    def test_no_pointer_api(self):
+        for name in ("state_dir", "pointer_path", "read_pointer_full", "read_pointer", "write_pointer"):
+            self.assertFalse(hasattr(resolve, name), name)
+
     def test_pointer_with_data_dir(self):
-        resolve.write_pointer("block:3", "conv-r", self.env, app_dir="/data/y")
-        self.assertEqual(resolve.read_pointer_full("block:3", self.env), ("conv-r", "/data/y"))
-        self.assertEqual(resolve.read_pointer("block:3", self.env), "conv-r")
-        r = resolve.Resolver(self.app, block="block:3", env=self.env, lsof=os.path.join(self.tmp, "no-lsof"))
+        pointer.write_pointer("block:3", "conv-r", self.env, app_dir="/data/y")
+        r = resolve.Resolver(self.app, fallback=lambda: pointer.read_pointer_full("block:3", self.env),
+                             lsof=os.path.join(self.tmp, "no-lsof"))
         self.assertEqual(r.resolve(), "conv-r")
         self.assertEqual(r.app_dir, "/data/y")
 
     def test_old_pointer_uses_configured_dir(self):
-        resolve.write_pointer("block:4", "conv-s", self.env)
-        self.assertEqual(resolve.read_pointer_full("block:4", self.env), ("conv-s", None))
-        r = resolve.Resolver(self.app, block="block:4", env=self.env)
+        pointer.write_pointer("block:4", "conv-s", self.env)
+        r = resolve.Resolver(self.app, fallback=lambda: pointer.read_pointer_full("block:4", self.env))
         self.assertEqual(r.resolve(), "conv-s")
         self.assertEqual(r.app_dir, self.app)
 

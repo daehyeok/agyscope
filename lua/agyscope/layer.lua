@@ -1,7 +1,7 @@
--- agy_subagent/layer.lua: finds the panel's floating layer in a session view.
+-- agyscope/layer.lua: finds the panel's floating layer in a session view.
 -- Pure Lua 5.1, no Rex API (tested by tests/lua/layer_test.lua).
 
-local config = require "agy_subagent.config"
+local config = require "agyscope.config"
 
 local M = {}
 

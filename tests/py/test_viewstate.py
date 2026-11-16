@@ -1,7 +1,7 @@
 import unittest
 
 import helpers  # noqa: F401
-from agy_subagent_py.viewstate import ViewState
+from agyscope.viewstate import ViewState
 
 W = 80
 

@@ -1,12 +1,12 @@
--- Manual check: runs the agy_subagent action for a given pane, as Rex would.
+-- Manual check: runs the agyscope action for a given pane, as Rex would.
 --   AGY_BLOCK=<block> AGY_SESSION=<session> [AGY_SERVER=<host>] rex do tests/lua/manual_toggle.lua [apps...]
 -- Opens, minimizes or restores that pane's panel, or shows the "no agent" message.
 
 local dir = debug.getinfo(1, "S").source:match("^@?(.*[/\\])") or "./"
 local root = dir .. "../../"
 package.path = root .. "lua/?.lua;" .. root .. "lua/?/init.lua;" .. package.path
-local config = require "agy_subagent.config"
-local plugin = require "agy_subagent"
+local config = require "agyscope.config"
+local plugin = require "agyscope"
 
 local apps = os.getenv("AGY_APPS")
 local opts = {}

@@ -1,7 +1,6 @@
-"""AgySubagentApp: list and view screens, 1 s refresh, root switch, empty states and the status line."""
+"""AgyscopeApp: list and view screens, 1 s refresh, root switch, empty states and the status line."""
 
 import contextlib
-import io
 import os
 import subprocess
 import sys
@@ -10,9 +9,8 @@ import time
 import unittest
 from unittest import mock
 
-import helpers
 import make_fixtures as fx
-from agy_subagent_py import discovery, textview
+from agyscope import discovery, textview
 
 try:
     import textual  # noqa: F401
@@ -22,9 +20,9 @@ except ImportError:
 
 if HAVE_TEXTUAL:
     # outside the try: a missing app module must fail, not skip
-    from agy_subagent_py import app as app_mod
-    from agy_subagent_py.app import AgySubagentApp, ListScreen, ViewScreen
-    from agy_subagent_py.widgets import StepView, SubagentTree, header_columns
+    from agyscope import app as app_mod
+    from agyscope.app import AgyscopeApp, ListScreen, ViewScreen
+    from agyscope.widgets import StepView, SubagentTree, header_columns
 
 SIZE = (120, 30)
 NOW = time.time()
@@ -62,7 +60,7 @@ def make_app(root=fx.ROOT, settings=SETTINGS, warnings=(), fixture=True):
     if fixture:
         fx.build_tree(app_dir)
     resolver = FakeResolver(root, app_dir)
-    return AgySubagentApp(discovery.Tree(app_dir), resolver, settings, warnings=warnings, clock=lambda: NOW)
+    return AgyscopeApp(discovery.Tree(app_dir), resolver, settings, warnings=warnings, clock=lambda: NOW)
 
 
 def text_of(static):
@@ -447,7 +445,7 @@ class AppKeysTest(unittest.IsolatedAsyncioTestCase):
             await open_view(pilot, app, downs=1)  # Checker
             suspend = mock.Mock(return_value=contextlib.nullcontext())
             with mock.patch.object(app_mod.pager, "show", return_value="pager failed") as show, \
-                    mock.patch.object(app_mod.AgySubagentApp, "suspend", suspend):
+                    mock.patch.object(app_mod.AgyscopeApp, "suspend", suspend):
                 await pilot.press("o")
                 await pilot.pause()
             suspend.assert_called_once_with()
@@ -463,58 +461,53 @@ class AppKeysTest(unittest.IsolatedAsyncioTestCase):
 
 
 @unittest.skipUnless(HAVE_TEXTUAL, "textual not installed")
-class MainTest(unittest.TestCase):
-    def run_main(self, result, argv):
-        setup = mock.Mock(args=mock.Mock(block="B1"), settings=SETTINGS, warnings=[])
-        with mock.patch.object(app_mod.cli, "setup", return_value=setup) as cli_setup, \
-                mock.patch.object(app_mod.AgySubagentApp, "run", return_value=result), \
-                mock.patch.object(app_mod.hook, "focus_block") as focus:
-            code = app_mod.main(argv)
-        cli_setup.assert_called_once_with(argv)
-        return code, focus
+class RunTest(unittest.TestCase):
+    def setup_mock(self):
+        return mock.Mock(on_close=mock.Mock(), settings=SETTINGS, warnings=[])
 
-    def test_true_focuses_block(self):
-        code, focus = self.run_main(True, ["--block", "B1"])
+    def run_app(self, result):
+        setup = self.setup_mock()
+        with mock.patch.object(app_mod.AgyscopeApp, "run", return_value=result):
+            code = app_mod.run(setup)
+        return code, setup.on_close
+
+    def test_true_calls_on_close(self):
+        code, on_close = self.run_app(True)
         self.assertEqual(code, 0)
-        focus.assert_called_once_with("B1")
+        on_close.assert_called_once_with()
 
     def test_false_returns_one(self):
-        code, focus = self.run_main(None, [])
+        code, on_close = self.run_app(None)
         self.assertEqual(code, 1)
-        focus.assert_not_called()
+        on_close.assert_not_called()
 
-    def test_focus_on_close(self):
-        # The launcher no longer focuses the block: app.main does it, only after `close` (run -> True).
-        for result, calls in ((True, [mock.call("b")]), (False, [])):
-            setup = mock.Mock(args=mock.Mock(block="b"), settings=SETTINGS, warnings=[])
-            with mock.patch.object(app_mod.cli, "setup", return_value=setup), \
-                    mock.patch.object(app_mod.AgySubagentApp, "run", return_value=result), \
-                    mock.patch.object(app_mod.hook, "focus_block") as focus:
-                code = app_mod.main(["--block", "b"])
+    def test_on_close_only_after_close(self):
+        for result, calls in ((True, 1), (False, 0)):
+            code, on_close = self.run_app(result)
             self.assertEqual(code, 0 if result else 1)
-            self.assertEqual(focus.call_args_list, calls)
+            self.assertEqual(on_close.call_count, calls)
+
+    def test_no_on_close(self):
+        setup = mock.Mock(on_close=None, settings=SETTINGS, warnings=[])
+        with mock.patch.object(app_mod.AgyscopeApp, "run", return_value=True):
+            self.assertEqual(app_mod.run(setup), 0)
 
     def test_crash_returns_two(self):
-        # Textual sets return_code 1 and run() returns None on an uncaught exception; the launcher
-        # only keeps the pane open (so the traceback stays visible) for codes other than 0/1.
+        # Textual sets return_code 1 and run() returns None on an uncaught exception; a crash must
+        # not look like ctrl+c (1), so cli.main keeps the traceback on screen.
         def crashed_run(app):
             app._return_code = 1
 
-        setup = mock.Mock(args=mock.Mock(block="b"), settings=SETTINGS, warnings=[])
-        with mock.patch.object(app_mod.cli, "setup", return_value=setup), \
-                mock.patch.object(app_mod.AgySubagentApp, "run", autospec=True, side_effect=crashed_run), \
-                mock.patch.object(app_mod.hook, "focus_block") as focus:
-            self.assertEqual(app_mod.main(["--block", "b"]), 2)
-        focus.assert_not_called()
+        setup = self.setup_mock()
+        with mock.patch.object(app_mod.AgyscopeApp, "run", autospec=True, side_effect=crashed_run):
+            self.assertEqual(app_mod.run(setup), 2)
+        setup.on_close.assert_not_called()
 
-    def test_setup_error_returns_two(self):
-        err = io.StringIO()
-        with mock.patch.object(app_mod.cli, "setup", side_effect=RuntimeError("boom")), \
-                mock.patch.object(app_mod.hook, "focus_block") as focus, \
-                contextlib.redirect_stderr(err):
-            self.assertEqual(app_mod.main([]), 2)
-        self.assertIn("RuntimeError: boom", err.getvalue())
-        focus.assert_not_called()
+    def test_exceptions_propagate(self):
+        setup = self.setup_mock()
+        with mock.patch.object(app_mod.AgyscopeApp, "run", side_effect=RuntimeError("boom")):
+            with self.assertRaises(RuntimeError):
+                app_mod.run(setup)
 
 
 class StartupCrashTest(unittest.TestCase):
@@ -526,9 +519,10 @@ class StartupCrashTest(unittest.TestCase):
                 os.mkdir(os.path.join(tmp, name))
                 with open(os.path.join(tmp, name, "__init__.py"), "w") as f:
                     f.write("raise ImportError('half-built venv')\n")
-            env = dict(os.environ, PYTHONPATH=os.pathsep.join([tmp, helpers.REPO]))
-            proc = subprocess.run([sys.executable, "-m", "agy_subagent_py.app", "--help"], cwd=tmp, env=env,
-                                  stdout=subprocess.PIPE, stderr=subprocess.PIPE, universal_newlines=True)
+            env = dict(os.environ, PYTHONPATH=tmp)
+            proc = subprocess.run([sys.executable, "-m", "agyscope", "--app-dir", tmp, "--conversation", "x"],
+                                  cwd=tmp, env=env, stdin=subprocess.DEVNULL, stdout=subprocess.PIPE,
+                                  stderr=subprocess.PIPE, universal_newlines=True, timeout=60)
         self.assertEqual(proc.returncode, 2, proc.stderr)
         self.assertIn("Traceback", proc.stderr)
         self.assertIn("half-built venv", proc.stderr)

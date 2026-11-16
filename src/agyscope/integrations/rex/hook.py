@@ -1,8 +1,9 @@
-"""PostToolUse hook for invoke_subagent: opens the panel on the first subagent.
+"""agyscope-rex-hook: PostToolUse hook for invoke_subagent; opens the panel on the first subagent.
 
 The agent runs the hook after each invoke_subagent call, with a JSON payload on
-stdin. The hook always prints {} at once and exits 0, whatever fails, so it never
-blocks or changes the agent. Inside Rex (REX_SESSION and REX_BLOCK set) it:
+stdin (see integrations/rex/hooks.json). The hook always prints {} at once and exits 0,
+whatever fails, so it never blocks or changes the agent. Inside Rex (REX_SESSION and
+REX_BLOCK set) it:
 
   1. records the pane's latest root conversation in the block pointer, with the agent's
      data directory taken from the payload's transcript path. The agent also runs the
@@ -10,60 +11,59 @@ blocks or changes the agent. Inside Rex (REX_SESSION and REX_BLOCK set) it:
   2. unless auto_open is false, forks a detached child that opens the panel in the
      pane's window, without focus, when that window has no panel for this pane yet.
      A lock directory makes parallel starts open only one panel.
+
+Settings (bounds, auto_open, interactive, command) come from the agyscope config file.
+Only the standard library and the stdlib-only .pointer/.focus are imported at module level;
+agyscope.config is imported inside main, so config/settings failures still answer {}.
 """
 
 import json
 import os
-import shutil
 import subprocess
 import sys
 import time
 
-from . import config, resolve
+from . import pointer
+from .focus import rex_cli
 
-LABEL_PREFIX = "agy-subagent:"
+LABEL_PREFIX = "agyscope:"
 LOCK_STALE = 60          # seconds after which a leftover lock is ignored
 POINTER_MAX_AGE = 7 * 86400
 REX_TIMEOUT = 10
 FLAVOR = "com.superlogical.terminal.shell"
 
 
-MACOS_REX = "Library/Application Support/com.superlogical.rex/RexServer/Versions/Current/Rex Server.app/Contents/MacOS/rex"
+def _check_bounds(value):
+    if (not isinstance(value, list) or len(value) != 4
+            or not all(isinstance(v, (int, float)) and not isinstance(v, bool) and 0 <= v <= 1 for v in value)):
+        raise ValueError("must be [x, y, w, h], each between 0 and 1")
+    return [float(v) for v in value]
+
+
+def settings_spec():
+    """The hook's own settings for config.load(extra=...); imports agyscope.config lazily."""
+    from ... import config
+    return {
+        "bounds": ([0.6, 0.04, 0.38, 0.42], _check_bounds),
+        "auto_open": (True, config.check_bool),
+        "interactive": (True, config.check_bool),
+        "command": (["agyscope"], config.check_str_list),
+    }
+
+
+def panel_command(command, argv0):
+    """command with a bare command[0] replaced by the executable next to argv0 (symlinks
+    resolved), when there is one, so the panel starts without relying on PATH."""
+    command = list(command)
+    if command and "/" not in command[0]:
+        sibling = os.path.join(os.path.dirname(os.path.realpath(argv0)), command[0])
+        if os.path.isfile(sibling) and os.access(sibling, os.X_OK):
+            command[0] = sibling
+    return command
 
 
 def label(block):
     return LABEL_PREFIX + block
-
-
-def rex_cli(env=None):
-    if env is None:
-        env = os.environ
-    d = env.get("REX_BIN_DIR")
-    if d and os.access(os.path.join(d, "rex"), os.X_OK):
-        return os.path.join(d, "rex")
-    which = shutil.which("rex", path=env.get("PATH"))
-    if which:
-        return which
-    home = env.get("HOME")
-    if home:
-        mac = os.path.join(home, MACOS_REX)
-        if os.access(mac, os.X_OK):
-            return mac
-    return "rex"
-
-
-def focus_block(block, env=None, timeout=2.0):
-    if env is None:
-        env = os.environ
-    if not block or not env.get("REX_SESSION"):
-        return False
-    try:
-        res = subprocess.run([rex_cli(env), "focus", block],
-                             stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
-                             timeout=timeout, check=False, env=env)
-        return res.returncode == 0
-    except (OSError, subprocess.SubprocessError):
-        return False
 
 
 def parse(payload):
@@ -141,9 +141,10 @@ def has_panel(view, block):
 
 def new_layer_request(session, window, block, conversation, bounds, panel_cmd, app_dir=None,
                       interactive=True):
-    """interactive: Rex runs the command through the user's shell with its interactive startup
-    files (~/.zshrc), so the panel finds what the user's terminals find (uv on a Nix PATH)."""
-    command = [panel_cmd, "--conversation", conversation, "--block", block]
+    """panel_cmd: the panel argv (list). interactive: Rex runs the command through the user's
+    shell with its interactive startup files (~/.zshrc), so the panel finds what the user's
+    terminals find."""
+    command = list(panel_cmd) + ["--conversation", conversation, "--rex-block", block]
     if app_dir:
         command += ["--app-dir", app_dir]
     return {
@@ -155,7 +156,7 @@ def new_layer_request(session, window, block, conversation, bounds, panel_cmd, a
 
 def open_panel(env, block, conversation, settings, panel_cmd, app_dir=None):
     """Opens the panel unless one exists; returns a short status string (for tests)."""
-    lock = resolve.pointer_path(block, env) + ".lock"
+    lock = pointer.pointer_path(block, env) + ".lock"
     try:
         if time.time() - os.stat(lock).st_mtime > LOCK_STALE:
             os.rmdir(lock)
@@ -192,7 +193,7 @@ def open_panel(env, block, conversation, settings, panel_cmd, app_dir=None):
 
 
 def housekeeping(env):
-    d = os.path.join(resolve.state_dir(env), "blocks")
+    d = os.path.join(pointer.state_dir(env), "blocks")
     now = time.time()
     try:
         names = os.listdir(d)
@@ -232,10 +233,12 @@ def detach(fn):
     os._exit(0)
 
 
-def main(stdin=None, stdout=None, env=None, panel_cmd=None):
+def main(stdin=None, stdout=None, env=None, argv0=None):
+    """Entry point of agyscope-rex-hook. Always writes {} first and returns 0."""
     stdin = sys.stdin if stdin is None else stdin
     stdout = sys.stdout if stdout is None else stdout
     env = dict(os.environ) if env is None else env
+    argv0 = sys.argv[0] if argv0 is None else argv0
     try:
         payload = stdin.read()
     except Exception:
@@ -256,11 +259,12 @@ def main(stdin=None, stdout=None, env=None, panel_cmd=None):
         root = root_of(data, app_dir)
         if not root:
             return 0
-        resolve.write_pointer(block, root, env, app_dir)
-        settings, _ = config.load({}, env)
+        pointer.write_pointer(block, root, env, app_dir)
+        from ... import config
+        settings, _ = config.load({}, env, extra=settings_spec())
         if not settings["auto_open"]:
             return 0
-        panel_cmd = panel_cmd or os.path.join(os.path.dirname(os.path.realpath(sys.argv[0])), "agy-subagent")
+        panel_cmd = panel_command(settings["command"], argv0)
 
         def child():
             open_panel(env, block, root, settings, panel_cmd, app_dir)
@@ -270,3 +274,7 @@ def main(stdin=None, stdout=None, env=None, panel_cmd=None):
     except Exception:
         pass
     return 0
+
+
+if __name__ == "__main__":
+    sys.exit(main())

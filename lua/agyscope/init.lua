@@ -1,15 +1,15 @@
--- agy_subagent: Rex plugin entry point. setup(opts) registers one action that, in the
+-- agyscope: Rex plugin entry point. setup(opts) registers one action that, in the
 -- focused pane's window:
 --   * minimizes a visible subagent panel, or restores, raises and focuses a minimized one;
 --   * with no panel, opens one (focused) for the agent running in the focused pane, on
 --     that pane's host;
 --   * with no agent in the pane, shows a short message pane.
--- It binds no keys: bind the action yourself, e.g. rex.bind("alt+s", "agy_subagent").
+-- It binds no keys: bind the action yourself, e.g. rex.bind("alt+s", "agyscope").
 
-local config = require "agy_subagent.config"
-local layer_mod = require "agy_subagent.layer"
-local rexapi = require "agy_subagent.rexapi"
-local message = require "agy_subagent.message"
+local config = require "agyscope.config"
+local layer_mod = require "agyscope.layer"
+local rexapi = require "agyscope.rexapi"
+local message = require "agyscope.message"
 
 local M = {}
 

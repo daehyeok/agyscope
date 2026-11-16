@@ -1,30 +1,20 @@
 """The Textual panel: a full-screen subagent list; `open` shows one subagent's steps full screen.
 
-Run as ``python -m agy_subagent_py.app ARGS`` (the launcher does this through uv). The panel
-only reads files; closing it stops nothing but the panel.
+Started by agyscope.cli.main through run(). The panel only reads files; closing it stops
+nothing but the panel.
 """
 
-import sys
 import time
-import traceback
 
-try:
-    from rich.text import Text
-    from textual.app import App, SuspendNotSupported
-    from textual.binding import Binding
-    from textual.screen import Screen
-    from textual.widgets import Static
+from rich.text import Text
+from textual.app import App, SuspendNotSupported
+from textual.binding import Binding
+from textual.screen import Screen
+from textual.widgets import Static
 
-    from . import cli, discovery, hook, keymap, pager, textview
-    from .viewstate import ViewState
-    from .widgets import StepView, SubagentTree, header_columns
-except Exception:
-    if __name__ != "__main__":
-        raise
-    # A half-built venv: exit 2 like any other crash, so the launcher keeps the traceback on screen
-    # (Python's own exit 1 would look like ctrl+c and close the pane).
-    traceback.print_exc()
-    sys.exit(2)
+from . import discovery, keymap, pager, textview
+from .viewstate import ViewState
+from .widgets import StepView, SubagentTree, header_columns
 
 REFRESH_S = 1.0
 _HINT_FIRST = {"open": "Enter", "back": "Esc"}  # action -> key the hints show when it is bound
@@ -96,7 +86,7 @@ class ViewScreen(Screen):
             self.query_one("#steps", StepView).action(name)
 
 
-class AgySubagentApp(App):
+class AgyscopeApp(App):
     """One root conversation's subagents, refreshed every second: a list screen and a view screen."""
 
     CSS = """
@@ -229,27 +219,18 @@ class AgySubagentApp(App):
             self.show_status()
 
 
-def main(argv) -> int:
-    """0 after `close` (the agent block gets focus), 1 after ctrl+c/ctrl+q, 2 when the panel crashed.
+def run(setup) -> int:
+    """0 after `close` (then setup.on_close runs, if set), 1 after ctrl+c/ctrl+q, 2 when the panel crashed.
 
-    The launcher keeps the pane open only for codes other than 0/1, so a crash must not return 1
-    (Textual's own code for an uncaught exception).
+    Textual returns None with return_code 1 on an uncaught exception; that must not look like
+    ctrl+c, so it becomes 2. Exceptions raised here propagate to cli.main.
     """
-    try:
-        s = cli.setup(argv)
-        app = AgySubagentApp(s.tree, s.resolver, s.settings, s.warnings)
-        result = app.run()
-    except Exception:
-        traceback.print_exc()
-        return 2
+    app = AgyscopeApp(setup.tree, setup.resolver, setup.settings, setup.warnings)
+    result = app.run()
     if app.return_code:
         return 2
     if result is not True:
         return 1
-    if s.args.block:
-        hook.focus_block(s.args.block)
+    if setup.on_close is not None:
+        setup.on_close()
     return 0
-
-
-if __name__ == "__main__":
-    sys.exit(main(sys.argv[1:]))

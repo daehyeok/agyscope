@@ -1,16 +1,16 @@
--- Tests for agy_subagent.config and agy_subagent.rexapi.matches.
+-- Tests for agyscope.config and agyscope.rexapi.matches.
 -- Run from anywhere: rex do path/to/tests/lua/config_test.lua
 
 local dir = debug.getinfo(1, "S").source:match("^@?(.*[/\\])") or "./"
 local t = dofile(dir .. "harness.lua")(dir)
-local config = require "agy_subagent.config"
-local rexapi = require "agy_subagent.rexapi"
+local config = require "agyscope.config"
+local rexapi = require "agyscope.rexapi"
 
 -- defaults
 local cfg = config.resolve(nil)
-t.check("default action", cfg.action == "agy_subagent")
+t.check("default action", cfg.action == "agyscope")
 t.check("default agent apps", cfg.agent_apps[1] == "agy" and cfg.agent_apps[2] == "antigravity")
-t.check("default command", cfg.command[1] == "agy-subagent" and #cfg.command == 1)
+t.check("default command", cfg.command[1] == "agyscope" and #cfg.command == 1)
 t.check("default bounds", #cfg.bounds == 4 and cfg.bounds[1] == 0.6)
 t.check("defaults are copies", config.resolve({}).agent_apps ~= config.OPTIONS.agent_apps[2])
 
@@ -27,7 +27,7 @@ t.raises("removed prefix option", function()
   config.resolve { prefix = "ctrl+b" }
 end, "unknown option 'prefix'")
 t.raises("wrong type", function()
-  config.resolve { command = "agy-subagent" }
+  config.resolve { command = "agyscope" }
 end, "option 'command' must be a table")
 t.raises("empty apps", function()
   config.resolve { agent_apps = {} }
@@ -43,7 +43,7 @@ t.raises("pager not a list", function()
 end, "pager")
 
 -- label
-t.check("label", config.label("block:1") == "agy-subagent:block:1")
+t.check("label", config.label("block:1") == "agyscope:block:1")
 
 -- json
 t.check("json list", config.json({ "bat", "--paging=always" }) == '["bat","--paging=always"]')
@@ -52,7 +52,7 @@ t.check("json object sorted", config.json({ up = { "K" }, down = { "J" } }) == '
 
 -- panel argv
 cfg = config.resolve {
-  command = { "~/bin/agy-subagent" },
+  command = { "~/bin/agyscope" },
   panel = {
     app_dir = "~/.gemini/x",
     keymap = "vim",
@@ -62,9 +62,9 @@ cfg = config.resolve {
 }
 local argv = config.panel_argv(cfg, 42, "block:9")
 t.check("launcher shell", argv[1] == "sh" and argv[2] == "-c" and argv[4] == "sh")
-t.check("command after launcher", argv[5] == "~/bin/agy-subagent")
+t.check("command after launcher", argv[5] == "~/bin/agyscope")
 local rest = table.concat(argv, " ", 6)
-t.check("pid and block", rest:find("--pid 42 --block block:9", 1, true) ~= nil, rest)
+t.check("pid and block", rest:find("--pid 42 --rex-block block:9", 1, true) ~= nil, rest)
 t.check(
   "panel flags",
   rest:find('--app-dir ~/.gemini/x --keymap vim --keys-json {"down":["J"]} --pager-json ["bat","-p"]', 1, true) ~= nil,
@@ -76,9 +76,9 @@ t.check("no flags by default", #config.panel_argv(config.resolve(), 1, "b") == 9
 t.check("default interactive", config.resolve().interactive == true)
 local blk = config.panel_block(config.resolve(), 42, "block:9")
 t.check("block flavor", blk.flavor == config.FLAVOR)
-t.check("block label", blk.label == "agy-subagent:block:9")
+t.check("block label", blk.label == "agyscope:block:9")
 t.check("block options interactive by default", blk.options.interactive == true)
-t.check("block options command", blk.options.command[5] == "agy-subagent" and blk.options.command[7] == "42")
+t.check("block options command", blk.options.command[5] == "agyscope" and blk.options.command[7] == "42")
 blk = config.panel_block(config.resolve { interactive = false }, 42, "block:9")
 t.check("block options interactive false", blk.options.interactive == false)
 t.raises("interactive not boolean", function()

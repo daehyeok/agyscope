@@ -6,7 +6,7 @@ import unittest
 
 import helpers  # noqa: F401
 import make_fixtures as fx
-from agy_subagent_py.transcript import (
+from agyscope.transcript import (
     Transcript,
     col_pad,
     col_slice,

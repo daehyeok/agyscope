@@ -1,12 +1,12 @@
 {
-  "rex-agy-subagent": {
+  "agyscope": {
     "PostToolUse": [
       {
         "matcher": "invoke_subagent",
         "hooks": [
           {
             "type": "command",
-            "command": "~/.local/bin/agy-subagent-hook",
+            "command": "~/.local/bin/agyscope-rex-hook",
             "timeout": 5
           }
         ]

@@ -18,32 +18,23 @@ jobs:
       fail-fast: false
       matrix:
         os: [ubuntu-latest, macos-latest]
-        python: ["3.9", "3.13", "3.x"]
+        python: ["3.10", "3.13", "3.x"]
     runs-on: ${{ matrix.os }}
-    steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-      - uses: actions/setup-python@v5
-        with:
-          python-version: ${{ matrix.python }}
-      - name: Unit tests
-        run: python -m unittest discover -s tests/py -t tests/py -v
-
-  textual:
-    name: textual
-    runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - uses: actions/setup-python@v5
         id: setup-python
         with:
-          python-version: "3.9"
+          python-version: ${{ matrix.python }}
       - uses: astral-sh/setup-uv@d4b2f3b6ecc6e67c4457f6d3e41ec42d3d0fcb86 # v5.4.2
         with:
           python-version: ${{ steps.setup-python.outputs.python-version }}
           enable-cache: true
           cache-dependency-glob: pyproject.toml # no uv.lock is shipped; uv resolves from PyPI
-      - name: Textual tests
-        run: REQUIRE_UV=1 sh tests/run_all.sh uv
+      - name: Python tests (pytest, incl. Textual)
+        env:
+          UV_PYTHON: ${{ steps.setup-python.outputs.python-version }}
+        run: sh tests/run_all.sh py
 
   lua:
     name: lua ${{ matrix.lua }}

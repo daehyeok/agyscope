@@ -4,8 +4,8 @@ import unittest
 
 import helpers  # noqa: F401
 import make_fixtures as fx
-from agy_subagent_py import discovery
-from agy_subagent_py.transcript import col_width
+from agyscope import discovery
+from agyscope.transcript import col_width
 
 
 class DiscoveryTest(unittest.TestCase):

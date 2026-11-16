@@ -1,7 +1,7 @@
 import unittest
 
 import helpers  # noqa: F401
-from agy_subagent_py import keymap
+from agyscope import keymap
 
 
 class KeymapTest(unittest.TestCase):

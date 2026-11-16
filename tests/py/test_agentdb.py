@@ -5,7 +5,7 @@ import tempfile
 import unittest
 
 import helpers  # noqa: F401
-from agy_subagent_py.agentdb import AgentDB, normalize_model, pb_fields
+from agyscope.agentdb import AgentDB, normalize_model, pb_fields
 
 
 def pb_varint_raw(n):

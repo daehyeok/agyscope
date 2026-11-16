@@ -1,18 +1,18 @@
--- agy_subagent/config.lua: setup options, their defaults and validation, and the argv
+-- agyscope/config.lua: setup options, their defaults and validation, and the argv
 -- that starts the panel on the pane's host. Pure Lua 5.1, no Rex API (tested by
 -- tests/lua/config_test.lua).
 
 local M = {}
 
-M.LABEL_PREFIX = "agy-subagent:"
+M.LABEL_PREFIX = "agyscope:"
 M.FLAVOR = "com.superlogical.terminal.shell"
 
 -- Option name -> { type, default }. Defaults suit the public Antigravity CLI.
 M.OPTIONS = {
-  action = { "string", "agy_subagent" },
+  action = { "string", "agyscope" },
   title = { "string", "Show/Hide Agent Subagent Panel" },
   agent_apps = { "table", { "agy", "antigravity" } },
-  command = { "table", { "agy-subagent" } },
+  command = { "table", { "agyscope" } },
   bounds = { "table", { 0.6, 0.04, 0.38, 0.42 } },
   panel = { "table", {} },
   interactive = { "boolean", true },
@@ -50,7 +50,7 @@ local function is_string_list(t)
 end
 
 local function fail(msg, level)
-  error("rex-agy-subagent: " .. msg, (level or 1) + 1)
+  error("agyscope: " .. msg, (level or 1) + 1)
 end
 
 -- Validated settings from user options (nil allowed). Raises an error naming the bad option.
@@ -199,7 +199,7 @@ end
 
 -- argv to open the panel for an agent process in block_id.
 function M.panel_argv(cfg, pid, block_id)
-  local args = { "--pid", tostring(pid), "--block", tostring(block_id) }
+  local args = { "--pid", tostring(pid), "--rex-block", tostring(block_id) }
   for _, f in ipairs(M.panel_flags(cfg.panel)) do
     args[#args + 1] = f
   end

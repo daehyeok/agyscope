@@ -1,10 +1,21 @@
 [project]
-name = "rex-agy-subagent"
+name = "agyscope"
 version = "0.2.0"
-requires-python = ">=3.9"
+description = "Unofficial read-only subagent viewer for the Antigravity agent CLI (agy)"
+requires-python = ">=3.10"
 dependencies = ["textual>=8.2,<9"]
 
-[tool.uv]
-package = false
-python-downloads = "never"
-python-preference = "only-system"
+[project.scripts]
+agyscope = "agyscope.cli:main"
+agyscope-rex-hook = "agyscope.integrations.rex.hook:main"
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[dependency-groups]
+dev = ["pytest>=8"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests/py"]
+pythonpath = ["tests/py", "tests/py/fixtures"]

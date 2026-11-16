@@ -3,7 +3,7 @@ import tempfile
 import unittest
 
 import helpers  # noqa: F401
-from agy_subagent_py import pager
+from agyscope import pager
 
 
 class PagerTest(unittest.TestCase):
@@ -25,7 +25,7 @@ class PagerTest(unittest.TestCase):
         self.assertIsNone(err)
         with open(out) as f:
             self.assertEqual(f.read(), "a\nb\n")
-        left = [n for n in os.listdir(tempfile.gettempdir()) if n.startswith("agy-subagent-")]
+        left = [n for n in os.listdir(tempfile.gettempdir()) if n.startswith("agyscope-")]
         self.assertEqual(left, [])
 
     def test_missing_pager(self):

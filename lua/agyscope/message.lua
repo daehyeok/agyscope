@@ -1,9 +1,9 @@
--- agy_subagent/message.lua: shows a short message in a small floating pane on the
+-- agyscope/message.lua: shows a short message in a small floating pane on the
 -- focused pane's host. The pane prints the text, closes after about 1 second or on
 -- any key, and gives focus back to the source pane. No desktop notifications.
 
-local config = require "agy_subagent.config"
-local rexapi = require "agy_subagent.rexapi"
+local config = require "agyscope.config"
+local rexapi = require "agyscope.rexapi"
 
 local M = {}
 
@@ -33,7 +33,7 @@ function M.request(ctx, window_id, text, rex_cli)
     layout = {
       block = {
         flavor = config.FLAVOR,
-        label = "agy-subagent-message",
+        label = "agyscope-message",
         options = { command = { "sh", "-c", M.SCRIPT, "sh", text, ctx.block_id, cli } },
       },
     },
@@ -45,7 +45,7 @@ end
 function M.show(api, ctx, window_id, text, rex_cli)
   local _, err = api.session.new_layer(M.request(ctx, window_id, text, rex_cli))
   if err ~= nil then
-    io.stderr:write("[rex-agy-subagent] " .. text .. "\n")
+    io.stderr:write("[agyscope] " .. text .. "\n")
   end
 end
 

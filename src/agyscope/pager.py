@@ -26,7 +26,7 @@ def show(pager, lines, title):
 
     Returns None on success or a one-line error. The caller must have suspended the app (App.suspend()).
     """
-    fd, path = tempfile.mkstemp(prefix="agy-subagent-", suffix=".txt")
+    fd, path = tempfile.mkstemp(prefix="agyscope-", suffix=".txt")
     try:
         with os.fdopen(fd, "w", encoding="utf-8") as w:
             w.write("\n".join(lines) + "\n")

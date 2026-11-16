@@ -1,18 +1,18 @@
--- Tests for agy_subagent.layer and agy_subagent.message.request.
+-- Tests for agyscope.layer and agyscope.message.request.
 -- Run from anywhere: rex do path/to/tests/lua/layer_test.lua
 
 local dir = debug.getinfo(1, "S").source:match("^@?(.*[/\\])") or "./"
 local t = dofile(dir .. "harness.lua")(dir)
-local layer = require "agy_subagent.layer"
-local message = require "agy_subagent.message"
+local layer = require "agyscope.layer"
+local message = require "agyscope.message"
 
 local panel_b2 = {
   layer_id = "f2",
   kind = "floating",
   state = "normal",
-  blocks = { { block_id = "p2", label = "agy-subagent:b2" } },
+  blocks = { { block_id = "p2", label = "agyscope:b2" } },
 }
-local other_float = { layer_id = "f3", kind = "floating", blocks = { { block_id = "x3", label = "agy-subagent:b9" } } }
+local other_float = { layer_id = "f3", kind = "floating", blocks = { { block_id = "x3", label = "agyscope:b9" } } }
 local view = {
   windows = {
     {
