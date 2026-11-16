@@ -154,8 +154,10 @@ class RepoContractTest(unittest.TestCase):
         self.assertIn('rex.bind("alt+s", "agyscope")', readme)
         self.assertIn("--rex-block", readme)
         self.assertIn("Unofficial", readme)
+        self.assertIn("uv tool install git+https://github.com/daehyeok/agyscope", readme)
+        self.assertIn('require("plugins.agyscope")', readme)
         for gone in ("AGY_SUBAGENT_", "bin/agy-subagent", "--block ", "agy_subagent", "3.9 or newer",
-                     "uv lock --upgrade --project", "hooks/hooks.json"):
+                     "uv lock --upgrade --project", "hooks/hooks.json", "rex-agy-subagent"):
             self.assertNotIn(gone, readme)
 
     def test_demo_gif_referenced_and_valid(self):

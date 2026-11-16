@@ -1,6 +1,6 @@
--- rex-agy-subagent: loader for `require("plugins.rex-agy-subagent")`.
+-- agyscope: loader for `require("plugins.agyscope")`.
 -- Adds this directory's lua/ to package.path and returns the agyscope module,
--- so `require("plugins.rex-agy-subagent").setup{}` works from a Rex config.
+-- so `require("plugins.agyscope").setup{}` works from a Rex config.
 
 local src = debug.getinfo(1, "S").source
 local dir = src:match("^@?(.*[/\\])") or "./"

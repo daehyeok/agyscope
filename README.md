@@ -1,6 +1,6 @@
 # agyscope
 
-[![test](https://github.com/daehyeok/rex-agy-subagent/actions/workflows/test.yml/badge.svg)](https://github.com/daehyeok/rex-agy-subagent/actions/workflows/test.yml)
+[![test](https://github.com/daehyeok/agyscope/actions/workflows/test.yml/badge.svg)](https://github.com/daehyeok/agyscope/actions/workflows/test.yml)
 
 `agyscope` is an unofficial, read-only viewer for the subagents of an Antigravity agent
 CLI (`agy`) session. It runs in any terminal.
@@ -37,14 +37,14 @@ Requirements, on every host that runs the agent:
 Install the `agyscope` and `agyscope-rex-hook` commands with uv:
 
 ```sh
-uv tool install git+https://github.com/daehyeok/rex-agy-subagent
+uv tool install git+https://github.com/daehyeok/agyscope
 ```
 
 or, from a clone (edits to the clone take effect at once):
 
 ```sh
-git clone https://github.com/daehyeok/rex-agy-subagent ~/src/rex-agy-subagent
-uv tool install --editable ~/src/rex-agy-subagent
+git clone https://github.com/daehyeok/agyscope ~/src/agyscope
+uv tool install --editable ~/src/agyscope
 ```
 
 uv puts the commands in its tool bin directory (normally `~/.local/bin`) and installs
@@ -240,14 +240,14 @@ Requires Rex with Lua config (`init.lua`). Clone the repository into your Rex co
 directory:
 
 ```sh
-git clone https://github.com/daehyeok/rex-agy-subagent ~/.config/rex/plugins/rex-agy-subagent
+git clone https://github.com/daehyeok/agyscope ~/.config/rex/plugins/agyscope
 ```
 
 Load it from `~/.config/rex/init.lua` and bind any key you like. The plugin binds
 none itself:
 
 ```lua
-require("plugins.rex-agy-subagent").setup{}
+require("plugins.agyscope").setup{}
 
 rex.bind("alt+s", "agyscope")            -- a single key
 -- rex.bind("ctrl+b>a>s", "agyscope")    -- or a prefix-style sequence
@@ -257,7 +257,7 @@ If your config doesn't search `~/.config/rex/?/init.lua`, add the plugin's `lua/
 directory to `package.path` yourself and use `require("agyscope").setup{}`:
 
 ```lua
-local dir = os.getenv("HOME") .. "/src/rex-agy-subagent/lua/"
+local dir = os.getenv("HOME") .. "/src/agyscope/lua/"
 package.path = dir .. "?.lua;" .. dir .. "?/init.lua;" .. package.path
 require("agyscope").setup{}
 ```
@@ -280,7 +280,7 @@ that `rex config check` reports.
 Example:
 
 ```lua
-require("plugins.rex-agy-subagent").setup{
+require("plugins.agyscope").setup{
   bounds = { 0.55, 0.05, 0.43, 0.5 },
   panel  = { keymap = "vim", pager = { "bat", "--paging=always", "--style=plain" } },
 }

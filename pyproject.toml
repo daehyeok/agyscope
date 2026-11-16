@@ -5,6 +5,10 @@ description = "Unofficial read-only subagent viewer for the Antigravity agent CL
 requires-python = ">=3.10"
 dependencies = ["textual>=8.2,<9"]
 
+[project.urls]
+Homepage = "https://github.com/daehyeok/agyscope"
+Repository = "https://github.com/daehyeok/agyscope"
+
 [project.scripts]
 agyscope = "agyscope.cli:main"
 agyscope-rex-hook = "agyscope.integrations.rex.hook:main"
