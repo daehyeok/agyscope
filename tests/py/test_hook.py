@@ -120,10 +120,21 @@ class HookTest(unittest.TestCase):
         self.assertEqual(blk["label"], "agy-subagent:block:src")
         self.assertEqual(blk["options"]["command"][1:], ["--conversation", "root-1", "--block", "block:src"])
         self.assertTrue(blk["options"]["command"][0].endswith("/bin/agy-subagent"))
+        self.assertIs(blk["options"]["interactive"], True)
         self.assertEqual(self.pointer(), "root-1")
         # a later start finds the panel and opens nothing
         self.run_hook(payload())
         self.assertEqual(len(self.calls()), 1)
+
+    def test_interactive_false_from_config(self):
+        d = os.path.join(self.tmp, "config", "rex-agy-subagent")
+        os.makedirs(d)
+        with open(os.path.join(d, "config.json"), "w") as f:
+            json.dump({"interactive": False}, f)
+        self.run_hook(payload())
+        calls = self.calls()
+        self.assertEqual(len(calls), 1)
+        self.assertIs(calls[0]["layout"]["block"]["options"]["interactive"], False)
 
     def test_parallel_starts_open_one(self):
         procs = [subprocess.Popen([sys.executable, HOOK], stdin=subprocess.PIPE, stdout=subprocess.PIPE,
@@ -250,95 +261,9 @@ class HookTest(unittest.TestCase):
         self.assertFalse(hook.focus_block("block:src", env_missing_rex))
         self.assertEqual(self.focus_calls(), ["block:src"])
 
-    def test_panel_close_returns_true(self):
-        import curses
-        from unittest import mock
-        from agy_subagent_py import config, discovery, resolve, ui
-
-        settings, _ = config.load({}, self.env)
-        resolver = resolve.Resolver(self.tmp, conversation="root-1")
-        tree = discovery.Tree(self.tmp)
-        tree.set_root("root-1")
-
-        class FakeStdscr:
-            def keypad(self, flag):
-                pass
-
-            def timeout(self, ms):
-                pass
-
-            def getmaxyx(self):
-                return (24, 80)
-
-            def erase(self):
-                pass
-
-            def refresh(self):
-                pass
-
-            def addnstr(self, y, x, text, n, attr=0):
-                pass
-
-            def getch(self):
-                return ord("q")
-
-        panel = ui.Panel(tree, resolver, settings)
-        with mock.patch("curses.curs_set"), mock.patch("curses.has_colors", return_value=False):
-            res = panel.run(FakeStdscr())
-        self.assertTrue(res)
-
-        with mock.patch("curses.wrapper", side_effect=KeyboardInterrupt):
-            self.assertFalse(ui.run(tree, resolver, settings))
-
-    def test_bin_agy_subagent_focus_on_close(self):
-        import importlib.util
-        from importlib.machinery import SourceFileLoader
-        from unittest import mock
-        path = os.path.join(helpers.REPO, "bin", "agy-subagent")
-        loader = SourceFileLoader("agy_subagent_bin", path)
-        spec = importlib.util.spec_from_loader(loader.name, loader)
-        mod = importlib.util.module_from_spec(spec)
-        loader.exec_module(mod)
-        with mock.patch("agy_subagent_py.ui.run", return_value=True), \
-             mock.patch("agy_subagent_py.hook.focus_block") as mock_focus:
-            mod.main(["--block", "block:src"])
-            mock_focus.assert_called_once_with("block:src")
-
-        with mock.patch("agy_subagent_py.ui.run", return_value=False), \
-             mock.patch("agy_subagent_py.hook.focus_block") as mock_focus:
-            mod.main(["--block", "block:src"])
-            mock_focus.assert_not_called()
-
-    def test_draw_view_header_shows_full_model(self):
-        from unittest import mock
-        from agy_subagent_py import config, discovery, resolve, transcript, ui
-
-        settings, _ = config.load({}, self.env)
-        resolver = resolve.Resolver(self.tmp, conversation="root-1")
-        tree = discovery.Tree(self.tmp, "root-1")
-        panel = ui.Panel(tree, resolver, settings)
-
-        t = transcript.Transcript("/nonexistent", "c1")
-        drawn = {}
-
-        class CaptureStdscr:
-            def addstr(self, y, x, text, attr=0):
-                drawn[y] = text
-
-        with mock.patch("curses.has_colors", return_value=False):
-            row_with_model = {
-                "id": "c1", "role": "Final Review Fixer", "state": "done",
-                "model": "gemini-3.8-flash-tiered", "t": t, "parent": "root-1",
-            }
-            panel.draw_view(CaptureStdscr(), row_with_model, ui.View("c1"), 10, 120)
-            self.assertIn("Final Review Fixer [done · gemini-3.8-flash-tiered]", drawn[0])
-
-            row_no_model = {
-                "id": "c1", "role": "Final Review Fixer", "state": "done",
-                "model": "-", "t": t, "parent": "root-1",
-            }
-            panel.draw_view(CaptureStdscr(), row_no_model, ui.View("c1"), 10, 120)
-            self.assertIn("Final Review Fixer [done]  ", drawn[0])
+    # The panel's close/focus and header tests live with the Textual app now:
+    # test_app (test_close_returns_true, test_ctrl_c_returns_false, test_focus_on_close),
+    # test_launcher (uv dispatch) and test_widgets (test_header_model_badge).
 
 
 if __name__ == "__main__":

@@ -54,13 +54,7 @@ local function run(cfg, ctx)
     window_id = window.window_id,
     bounds = cfg.bounds,
     focus = true,
-    layout = {
-      block = {
-        flavor = config.FLAVOR,
-        label = config.label(ctx.block_id),
-        options = { command = config.panel_argv(cfg, pid, ctx.block_id) },
-      },
-    },
+    layout = { block = config.panel_block(cfg, pid, ctx.block_id) },
   }
   if nerr ~= nil then
     message.show(api, ctx, window.window_id, "Can't open the panel: " .. tostring(nerr))

@@ -139,14 +139,17 @@ def has_panel(view, block):
     return False
 
 
-def new_layer_request(session, window, block, conversation, bounds, panel_cmd, app_dir=None):
+def new_layer_request(session, window, block, conversation, bounds, panel_cmd, app_dir=None,
+                      interactive=True):
+    """interactive: Rex runs the command through the user's shell with its interactive startup
+    files (~/.zshrc), so the panel finds what the user's terminals find (uv on a Nix PATH)."""
     command = [panel_cmd, "--conversation", conversation, "--block", block]
     if app_dir:
         command += ["--app-dir", app_dir]
     return {
         "session_id": session, "window_id": window, "bounds": bounds, "focus": False,
         "layout": {"block": {"flavor": FLAVOR, "label": label(block),
-                             "options": {"command": command}}},
+                             "options": {"command": command, "interactive": interactive}}},
     }
 
 
@@ -175,7 +178,8 @@ def open_panel(env, block, conversation, settings, panel_cmd, app_dir=None):
         window = window_of(view, block)
         if not window:
             return "no window"
-        req = new_layer_request(session, window, block, conversation, settings["bounds"], panel_cmd, app_dir)
+        req = new_layer_request(session, window, block, conversation, settings["bounds"], panel_cmd, app_dir,
+                                settings["interactive"])
         subprocess.run([rex, "api", "call", "session.new_layer", "-"], input=json.dumps(req).encode(),
                        stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, timeout=REX_TIMEOUT,
                        check=False, env=env)

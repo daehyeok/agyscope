@@ -25,6 +25,7 @@ DEFAULTS = {
     "pager": ["less", "-R", "+G"],
     "bounds": [0.6, 0.04, 0.38, 0.42],
     "auto_open": True,
+    "interactive": True,
 }
 
 ENV_PREFIX = "AGY_SUBAGENT_"
@@ -72,7 +73,7 @@ def _check(name, value):
                 or not all(isinstance(v, (int, float)) and not isinstance(v, bool) and 0 <= v <= 1 for v in value)):
             raise ValueError("must be [x, y, w, h], each between 0 and 1")
         return [float(v) for v in value]
-    if name == "auto_open":
+    if name in ("auto_open", "interactive"):
         if not isinstance(value, bool):
             raise ValueError("must be true or false")
         return value
@@ -82,7 +83,7 @@ def _check(name, value):
 def _from_env(name, raw):
     if name in ("app_dir", "keymap"):
         return raw
-    if name == "auto_open":
+    if name in ("auto_open", "interactive"):
         low = raw.strip().lower()
         if low in ("1", "true", "yes", "on"):
             return True

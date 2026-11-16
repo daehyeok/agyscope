@@ -39,4 +39,4 @@ repos:
         language: system
         entry: sh tests/run_all.sh
         pass_filenames: false
-        files: '(\.(lua|py)$|^bin/)'
+        files: '(\.(lua|py)$|^bin/|pyproject\.toml|uv\.lock)'

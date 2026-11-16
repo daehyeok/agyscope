@@ -1,4 +1,4 @@
-"""Panel key handling: presets, user-added keys, and decoding curses input into key names.
+"""Panel key handling: presets, user-added keys, and mapping Textual key names onto them.
 
 Key names:
   single characters        "q", "G", "<"
@@ -12,7 +12,13 @@ Actions:
 Keys in ALWAYS work in every preset. A preset adds its own keys, and user keys
 (``keys`` setting: action -> key or list of keys) are added last, so a user key
 that a preset also uses moves to the user's action.
+
+Textual reports Esc followed by < or > as plain < and >, so build() binds M-< and M->
+to the plain keys (META_ALIASES). Meta keys Textual can't report at all are in
+UNREACHABLE; unreachable() lists the ones a keymap uses so the panel can warn.
 """
+
+import string
 
 ACTIONS = ("up", "down", "page_up", "page_down", "first", "last",
            "open", "fold_all", "pager", "back", "close")
@@ -37,6 +43,22 @@ PRESETS = {
         "pager": ["o"], "back": ["Esc"], "close": ["q"],
     },
 }
+
+META_ALIASES = {"M-<": "<", "M->": ">"}
+
+# Esc b / Esc f arrive as ctrl+left / ctrl+right, Esc + digit or "-" / "=" as macOS Option
+# characters, and Esc + other punctuation as the plain character.
+UNREACHABLE = frozenset("M-" + c for c in "bf " + string.digits + string.punctuation
+                        if "M-" + c not in META_ALIASES)
+
+# Textual Key.key -> key name, for keys that have no single printable character.
+_TEXTUAL_NAMED = {
+    "enter": "Enter", "tab": "Tab", "escape": "Esc", "space": "Space", "up": "Up", "down": "Down",
+    "left": "Left", "right": "Right", "pageup": "PgUp", "pagedown": "PgDn", "home": "Home", "end": "End",
+}
+
+# Textual Key.key modifier prefix -> our prefix, for one-character keys (alt+shift+v is M-V).
+_TEXTUAL_MODS = (("ctrl+", "C-"), ("alt+shift+", "M-"), ("alt+", "M-"))
 
 _ALIASES = {"c-m": "Enter", "c-j": "Enter", "c-i": "Tab", "c-[": "Esc", " ": "Space",
             "ret": "Enter", "return": "Enter", "escape": "Esc", "pageup": "PgUp",
@@ -77,54 +99,28 @@ def build(preset="emacs", extra=None):
                 n = normalize(k)
                 if n is None:
                     raise ValueError("bad key %r for %s" % (k, action))
-                out[n] = action
+                out[META_ALIASES.get(n, n)] = action
     return out
+
+
+def unreachable(keymap):
+    """Key names in keymap that Textual can't report (sorted), for status-line warnings."""
+    return sorted(k for k in keymap if k in UNREACHABLE)
+
+
+def from_textual(key, character=None):
+    """Key name for a Textual Key event's key and character, or None if it has none."""
+    if key in _TEXTUAL_NAMED:
+        return _TEXTUAL_NAMED[key]
+    for prefix, mod in _TEXTUAL_MODS:
+        if key.startswith(prefix) and len(key) == len(prefix) + 1:
+            ch = key[-1].upper() if prefix == "alt+shift+" else key[-1]
+            return normalize(mod + ch)
+    if "+" not in key and character is not None and len(character) == 1 and character.isprintable():
+        return character
+    return None
 
 
 def keys_for(keymap, action):
     """Key names bound to action, in a stable order (for the title row)."""
     return sorted((k for k, a in keymap.items() if a == action), key=lambda k: (len(k), k))
-
-
-def decode(code, next_code=None):
-    """Key name for one curses getch() code.
-
-    next_code is called after an Esc (27) to read the following code without waiting
-    long; it returns -1 when no key follows (then the key is a lone Esc).
-    """
-    import curses  # only needed when decoding real input
-    named = {
-        curses.KEY_UP: "Up", curses.KEY_DOWN: "Down", curses.KEY_LEFT: "Left",
-        curses.KEY_RIGHT: "Right", curses.KEY_PPAGE: "PgUp", curses.KEY_NPAGE: "PgDn",
-        curses.KEY_HOME: "Home", curses.KEY_END: "End", curses.KEY_ENTER: "Enter",
-    }
-    if code in named:
-        return named[code]
-    return decode_byte(code, next_code)
-
-
-def decode_byte(code, next_code=None):
-    """Key name for a plain byte code (no curses KEY_* constants); see decode()."""
-    if code in (10, 13):
-        return "Enter"
-    if code == 9:
-        return "Tab"
-    if code == 32:
-        return "Space"
-    if code == 27:
-        nxt = next_code() if next_code else -1
-        if nxt is None or nxt < 0:
-            return "Esc"
-        if 32 < nxt < 127:
-            return "M-" + chr(nxt)
-        return "Esc"
-    if 0 < code < 27:
-        return "C-" + chr(96 + code)
-    if 32 < code < 127:
-        return chr(code)
-    if code > 127:
-        try:
-            return chr(code)
-        except ValueError:
-            return None
-    return None

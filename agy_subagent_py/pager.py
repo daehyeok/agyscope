@@ -24,7 +24,7 @@ def argv(pager, path, prompt=None):
 def show(pager, lines, title):
     """Writes lines to a temp file, runs the pager on it, removes the file.
 
-    Returns None on success or a one-line error. The caller must have suspended curses.
+    Returns None on success or a one-line error. The caller must have suspended the app (App.suspend()).
     """
     fd, path = tempfile.mkstemp(prefix="agy-subagent-", suffix=".txt")
     try:

@@ -72,6 +72,19 @@ t.check(
 )
 t.check("no flags by default", #config.panel_argv(config.resolve(), 1, "b") == 9)
 
+-- panel block: runs through the user's shell with interactive startup files by default
+t.check("default interactive", config.resolve().interactive == true)
+local blk = config.panel_block(config.resolve(), 42, "block:9")
+t.check("block flavor", blk.flavor == config.FLAVOR)
+t.check("block label", blk.label == "agy-subagent:block:9")
+t.check("block options interactive by default", blk.options.interactive == true)
+t.check("block options command", blk.options.command[5] == "agy-subagent" and blk.options.command[7] == "42")
+blk = config.panel_block(config.resolve { interactive = false }, 42, "block:9")
+t.check("block options interactive false", blk.options.interactive == false)
+t.raises("interactive not boolean", function()
+  config.resolve { interactive = "yes" }
+end, "option 'interactive' must be a boolean")
+
 -- process matching
 t.check("match name", rexapi.matches({ "agy" }, "agy", nil))
 t.check("match path basename", rexapi.matches({ "agy" }, nil, "/usr/local/bin/agy"))

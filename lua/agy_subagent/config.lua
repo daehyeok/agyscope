@@ -15,6 +15,7 @@ M.OPTIONS = {
   command = { "table", { "agy-subagent" } },
   bounds = { "table", { 0.6, 0.04, 0.38, 0.42 } },
   panel = { "table", {} },
+  interactive = { "boolean", true },
 }
 
 -- Panel settings passed as flags; the panel validates their contents itself.
@@ -203,6 +204,17 @@ function M.panel_argv(cfg, pid, block_id)
     args[#args + 1] = f
   end
   return M.launcher(cfg.command, args)
+end
+
+-- Block layout for the panel layer. interactive makes Rex run the command through the
+-- user's shell with its interactive startup files (~/.zshrc), so the panel sees the same
+-- PATH as the user's terminals.
+function M.panel_block(cfg, pid, block_id)
+  return {
+    flavor = M.FLAVOR,
+    label = M.label(block_id),
+    options = { command = M.panel_argv(cfg, pid, block_id), interactive = cfg.interactive },
+  }
 end
 
 return M
