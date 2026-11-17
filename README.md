@@ -14,8 +14,7 @@ sends anything to an agent or a terminal.
 > **Unofficial.** This project is not affiliated with or endorsed by Google. See
 > [Disclaimer](#disclaimer).
 
-![demo](docs/demo.gif)
-> Note: `docs/demo.gif` is stale (showing the previous UI) and will be re-recorded.
+![demo](https://raw.githubusercontent.com/daehyeok/agyscope/main/docs/demo.gif)
 
 agyscope rebuilds the tree from the agent's transcripts, so it always shows every
 subagent of the session, including ones that finished before you opened it. Closing
@@ -29,28 +28,44 @@ first subagent starts.
 
 Requirements, on every host that runs the agent:
 
-- [uv](https://docs.astral.sh/uv/) and Python 3.10 or newer (a uv-managed Python is fine);
+- [uv](https://docs.astral.sh/uv/) and Python 3.11 or newer (a uv-managed Python is fine);
 - `less`, or the pager you configure;
 - `lsof` to follow an agent process. On Linux it is optional: without it agyscope reads
   `/proc/<pid>/fd`.
 
-Install the `agyscope` and `agyscope-rex-hook` commands with uv:
+Install the `agyscope` and `agyscope-rex-hook` commands from PyPI with uv:
+
+```sh
+uv tool install agyscope
+```
+
+Upgrade, pin a version, or uninstall:
+
+```sh
+uv tool upgrade agyscope
+uv tool install agyscope==0.2.1
+uv tool uninstall agyscope
+```
+
+(`pipx install agyscope` also works.)
+
+uv puts the commands in its tool bin directory (normally `~/.local/bin`) and installs
+Textual into the tool's own environment, using the host's own index configuration
+(`uv.toml`, `UV_INDEX_URL`, ...). Nothing else is installed globally.
+
+### Development / from source
+
+To install directly from GitHub or from an editable local clone (edits to the clone
+take effect at once):
 
 ```sh
 uv tool install git+https://github.com/daehyeok/agyscope
 ```
 
-or, from a clone (edits to the clone take effect at once):
-
 ```sh
 git clone https://github.com/daehyeok/agyscope ~/src/agyscope
 uv tool install --editable ~/src/agyscope
 ```
-
-uv puts the commands in its tool bin directory (normally `~/.local/bin`) and installs
-Textual into the tool's own environment, using the host's own index configuration
-(`uv.toml`, `UV_INDEX_URL`, pip config, ...). Nothing else is installed globally.
-`uv tool upgrade agyscope` updates it.
 
 ## Usage
 
@@ -82,23 +97,32 @@ agyscope crashed. After a crash on a terminal it waits for `Enter`, so the trace
 stays readable.
 
 Settings flags: `--app-dir DIR`, `--keymap emacs|vim`, `--keys-json JSON`,
-`--pager-json JSON` (see [Configuration](#configuration)). `agyscope --help` lists them all.
+`--pager-json JSON`, `--theme NAME`, `--marquee` / `--no-marquee`
+(see [Configuration](#configuration)). `agyscope --help` lists them all.
 
 ## Configuration
 
 For each setting, the first source that sets it wins:
 
-1. command-line flags (`--app-dir`, `--keymap`, `--keys-json`, `--pager-json`);
-2. the config file `${XDG_CONFIG_HOME:-~/.config}/agyscope/config.json` (normally
-   `~/.config/agyscope/config.json`), or the file named by `AGYSCOPE_CONFIG`;
+1. command-line flags (`--app-dir`, `--keymap`, `--keys-json`, `--pager-json`, `--theme`,
+   `--marquee` / `--no-marquee`);
+2. the config file `${XDG_CONFIG_HOME:-~/.config}/agyscope/config.toml` (normally
+   `~/.config/agyscope/config.toml`), or the file named by `AGYSCOPE_CONFIG`;
 3. the defaults.
+
+> **Migrating from 0.2.0:** config.json is no longer read; convert it to config.toml.
+> If `config.json` sits next to a missing `config.toml`, agyscope warns on the status line
+> and starts with the defaults.
 
 | Setting | Default | Description |
 |---|---|---|
 | `app_dir` | `"~/.gemini/antigravity-cli"` | Fallback data directory of the agent. It holds `brain/<conversation>/…/transcript.jsonl` and `presence/`. |
 | `keymap` | `"emacs"` | Key preset: `"emacs"` or `"vim"`. |
-| `keys` | `{}` | Extra keys per action, added to the preset: `{"down": ["J"], "close": "C-x"}`. |
+| `keys` | `{}` | Extra keys per action, added to the preset, e.g. `keys = { down = ["J"], close = "C-x" }`. |
 | `pager` | `["less", "-R", "+G"]` | Pager argv for the pager action. The file path replaces a `{file}` argument, or is appended. |
+| `theme` | `"textual-dark"` | Theme name (Textual built-in or a file in `~/.config/agyscope/themes/`). |
+| `marquee` | `true` | Horizontally scroll the highlighted row's **Last step** cell when it overflows. |
+| `columns` | `{role = 24, state = 8, model = 22, age = 5}` | Initial list column widths in cells (`role` 8–80, `state` 4–20, `model` 6–60, `age` 3–10). |
 
 The data directory is usually found without `app_dir`: from the presence lock the agent
 process holds open (`--pid`), or from the transcript path the Rex hook records. Those
@@ -112,15 +136,53 @@ An invalid value shows a warning on the bottom line (with `--once`/`--view`, on 
 and agyscope uses the default for that setting. A config mistake never stops it from
 starting.
 
-Example `~/.config/agyscope/config.json`:
+See [examples/config.toml](https://github.com/daehyeok/agyscope/blob/main/examples/config.toml) for a commented template with every
+setting. Example `~/.config/agyscope/config.toml`:
 
-```json
-{
-  "keymap": "emacs",
-  "keys": { "down": ["J"], "up": ["K"] },
-  "pager": ["bat", "--paging=always", "--style=plain"]
-}
+```toml
+keymap = "emacs"
+pager = ["bat", "--paging=always", "--style=plain"]
+theme = "catppuccin-mocha"
+
+[keys]
+down = ["J"]
+up = ["K"]
+
+[columns]
+role = 28
 ```
+
+## Themes
+
+Set `theme = "<name>"` in `config.toml` or pass `--theme <name>`. Built-in Textual themes
+include `textual-dark`, `textual-light`, `nord`, `gruvbox`, `dracula`, `tokyo-night`,
+`monokai`, `flexoki`, `solarized-light`, `solarized-dark`, `rose-pine`, `rose-pine-moon`,
+`rose-pine-dawn`, `atom-one-dark`, `atom-one-light`, `catppuccin-mocha`,
+`catppuccin-latte`, `catppuccin-frappe`, `catppuccin-macchiato`, `ansi-dark`, and
+`ansi-light`.
+
+User themes live in `~/.config/agyscope/themes/*.toml` (or `themes/` beside
+`AGYSCOPE_CONFIG`). Each file defines a Textual theme: `primary` is required, `name`
+defaults to the file stem, and any of `secondary`, `warning`, `error`, `success`,
+`accent`, `foreground`, `background`, `surface`, `panel`, `boost`, `dark`,
+`luminosity_spread`, `text_alpha`, `ansi`, and `[variables]` are accepted. A user theme
+with the same name as a built-in replaces it. Invalid theme files warn and are skipped.
+
+Subagent state colors follow the active theme (`working`/`running` → `$warning`,
+`done` → `$success`, `error`/`failed`/`warn` → `$error`, `waiting` → `$primary`,
+`msg`/`cmd` → `$accent`, `quiet`/`dim` → `$text-muted`). Any state or step style can be
+overridden in `[variables]` with `agyscope-<state>` (such as `agyscope-waiting`).
+
+To use the shipped Catppuccin Mocha palette and state colors
+([examples/themes/catppuccin-mocha.toml](https://github.com/daehyeok/agyscope/blob/main/examples/themes/catppuccin-mocha.toml)):
+
+```sh
+mkdir -p ~/.config/agyscope/themes
+curl -fsSL https://raw.githubusercontent.com/daehyeok/agyscope/main/examples/themes/catppuccin-mocha.toml \
+  -o ~/.config/agyscope/themes/catppuccin-mocha.toml
+```
+
+Then set `theme = "catppuccin-mocha"` in `~/.config/agyscope/config.toml`.
 
 ## Keys
 
@@ -172,10 +234,18 @@ under **Completed** otherwise. These are the states:
 - **Age** (5 cells, right-aligned).
 - **Last step** (remaining width, ending in `…` if longer).
 
-When the window is narrower than 73 columns, **Last step** is dropped and **Model**
-shrinks to fit (down to 8 cells). Below 48 columns, **Model** is dropped too; the full
-model name is always shown in the view screen's header. Group rows (`Working` and
-`Completed`) show only the group name.
+When the window is narrower than 73 columns (with default widths), **Last step** is
+dropped and **Model** shrinks to fit (down to 8 cells). Below 48 columns, **Model** is
+dropped too; the full model name is always shown in the view screen's header. Group rows
+(`Working` and `Completed`) show only the group name.
+
+Initial widths can be set under `[columns]` in `config.toml`. You can also drag the
+column header borders horizontally with the mouse to resize columns for the current
+session (dragged widths are not saved back to the config file).
+
+**Marquee.** When the highlighted row's **Last step** is wider than its cell, it pauses
+for 1.5 s, scrolls sideways a cell at a time until the end is visible, pauses for 1.5 s,
+and jumps back to the start. Set `marquee = false` (or pass `--no-marquee`) to disable it.
 
 **View screen.** Shows the selected subagent's live steps full screen, grouped under
 the message that started each turn:
@@ -231,13 +301,15 @@ pane, and return focus to the agent pane after `close` (`q`). Without it agyscop
 no Rex code.
 
 Remote panes are supported: the panel runs on the host where the agent runs and reads
-that host's transcripts. [Install](#install) agyscope with `uv tool install` on every
-host whose panes run the agent. Rex itself needs only the Lua plugin.
+that host's transcripts. [Install](#install) `agyscope` (`uv tool install agyscope`) on
+every host whose panes run the agent—that provides both the `agyscope` and
+`agyscope-rex-hook` Python commands. Rex itself only needs the Lua plugin.
 
 ### Lua plugin (Rex client)
 
 Requires Rex with Lua config (`init.lua`). Clone the repository into your Rex config
-directory:
+directory (the clone only provides the Lua plugin; `agyscope` and `agyscope-rex-hook`
+come from the PyPI [install](#install)):
 
 ```sh
 git clone https://github.com/daehyeok/agyscope ~/.config/rex/plugins/agyscope
@@ -257,7 +329,7 @@ If your config doesn't search `~/.config/rex/?/init.lua`, add the plugin's `lua/
 directory to `package.path` yourself and use `require("agyscope").setup{}`:
 
 ```lua
-local dir = os.getenv("HOME") .. "/src/agyscope/lua/"
+local dir = os.getenv("HOME") .. "/.config/rex/plugins/agyscope/lua/"
 package.path = dir .. "?.lua;" .. dir .. "?/init.lua;" .. package.path
 require("agyscope").setup{}
 ```
@@ -274,7 +346,7 @@ that `rex config check` reports.
 | `agent_apps` | `{ "agy", "antigravity" }` | Program names that count as the agent. They are matched against Rex's program status, then the pane's foreground process name, path or `argv0`. |
 | `command` | `{ "agyscope" }` | Panel command on the pane's host, as an argv list. It is looked up on `PATH` plus `~/.local/bin`; a leading `~/` is expanded on that host. |
 | `bounds` | `{ 0.6, 0.04, 0.38, 0.42 }` | Panel position and size `{ x, y, w, h }`, as fractions of the window (top-right). |
-| `panel` | `{}` | agyscope settings passed as flags: `app_dir`, `keymap`, `keys`, `pager` (see [Configuration](#configuration)). They override the host's config file for panels this action opens. |
+| `panel` | `{}` | agyscope settings passed as flags: `app_dir`, `keymap`, `keys`, `pager` (see [Configuration](#configuration)). They override the host's config file for panels this action opens. `theme`, `marquee`, and `columns` are set only in `config.toml` (not via `panel`). |
 | `interactive` | `true` | Run the panel through your shell with its interactive startup files (`~/.zshrc`, `~/.bashrc`), so it finds what your terminals find. See [The panel's PATH](#the-panels-path). |
 
 Example:
@@ -288,10 +360,11 @@ require("plugins.agyscope").setup{
 
 ### The hook (optional, each host that runs the agent)
 
-`agyscope-rex-hook` is installed with agyscope. It needs an agent CLI version that runs
-`PostToolUse` hooks from `~/.gemini/config/hooks.json`; the key binding works without
-it. Merge [integrations/rex/hooks.json](integrations/rex/hooks.json) into
-`~/.gemini/config/hooks.json`:
+`agyscope-rex-hook` is installed alongside `agyscope` by `uv tool install agyscope`. It
+needs an agent CLI version that runs `PostToolUse` hooks from `~/.gemini/config/hooks.json`;
+the key binding works without it. Merge
+[integrations/rex/hooks.json](https://github.com/daehyeok/agyscope/blob/main/integrations/rex/hooks.json)
+into `~/.gemini/config/hooks.json`:
 
 ```json
 {
@@ -310,7 +383,7 @@ agent. Outside Rex it does nothing.
 ### Hook settings
 
 The hook reads these from the same config file as agyscope
-(`~/.config/agyscope/config.json`, or `AGYSCOPE_CONFIG`):
+(`~/.config/agyscope/config.toml`, or `AGYSCOPE_CONFIG`):
 
 | Setting | Default | Description |
 |---|---|---|
@@ -331,7 +404,7 @@ your terminals. The plugin also looks in `~/.local/bin`, where `uv tool install`
 `agyscope`; it never guesses other install directories.
 
 If your rc files are slow, print output or ask questions, set `interactive = false`
-in `setup{}` and `"interactive": false` in the config file. Then make sure `agyscope`
+in `setup{}` and `interactive = false` in `config.toml`. Then make sure `agyscope`
 is on the login `PATH` or in `~/.local/bin`, or set `command` to its full path.
 
 ## Limits
@@ -366,7 +439,7 @@ Fixtures are synthetic; `uv run python tests/py/fixtures/make_fixtures.py` regen
 
 The [pre-commit](https://pre-commit.com) hooks check whitespace and YAML, run shellcheck and the
 [StyLua](https://github.com/JohnnyMorganz/StyLua) format check (`stylua --check .`; fix with `stylua .`)
-when they're installed, and run the tests. CI runs the Python tests with uv on Python 3.10,
+when they're installed, and run the tests. CI runs the Python tests with uv on Python 3.11,
 3.13 and the latest 3.x, the Lua tests, and the same hooks with both tools required.
 
 `tests/lua/manual_toggle.lua` runs the Rex action for a given pane
@@ -388,4 +461,4 @@ implied.
 
 ## License
 
-MIT, see [LICENSE](LICENSE).
+MIT, see [LICENSE](https://github.com/daehyeok/agyscope/blob/main/LICENSE).

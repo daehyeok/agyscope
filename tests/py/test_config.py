@@ -1,9 +1,10 @@
-import json
 import os
+import re
 import tempfile
+import tomllib
 import unittest
 
-import helpers  # noqa: F401
+import helpers
 from agyscope import config
 
 
@@ -17,8 +18,8 @@ class ConfigTest(unittest.TestCase):
 
     def write_to(self, d, data):
         os.makedirs(d, exist_ok=True)
-        with open(os.path.join(d, "config.json"), "w") as f:
-            f.write(data if isinstance(data, str) else json.dumps(data))
+        with open(os.path.join(d, "config.toml"), "w", encoding="utf-8") as f:
+            f.write(data if isinstance(data, str) else helpers.toml_dumps(data))
 
     def test_defaults(self):
         s, w = config.load({}, self.env)
@@ -26,10 +27,17 @@ class ConfigTest(unittest.TestCase):
         self.assertEqual(s["keymap"], "emacs")
         self.assertEqual(s["pager"], ["less", "-R", "+G"])
         self.assertEqual(s["app_dir"], os.path.expanduser("~/.gemini/antigravity-cli"))
-        self.assertEqual(set(s), {"app_dir", "keymap", "keys", "pager"})
+        self.assertEqual(s["theme"], "textual-dark")
+        self.assertIs(s["marquee"], True)
+        self.assertEqual(s["columns"], config.COLUMNS)
+        self.assertEqual(set(s), {"app_dir", "columns", "keymap", "keys", "marquee", "pager", "theme"})
 
     def test_config_path_default(self):
-        self.assertEqual(config.config_path(self.env), os.path.join(self.tmp, "agyscope", "config.json"))
+        self.assertEqual(config.config_path(self.env), os.path.join(self.tmp, "agyscope", "config.toml"))
+
+    def test_themes_dir(self):
+        self.assertEqual(config.themes_dir(self.env), os.path.join(self.tmp, "agyscope", "themes"))
+        self.assertEqual(config.themes_dir({"AGYSCOPE_CONFIG": "/x/y/c.toml"}), os.path.join("/x/y", "themes"))
 
     def test_env_vars_are_ignored(self):
         env = dict(self.env, AGY_SUBAGENT_KEYMAP="vim", AGY_SUBAGENT_PAGER='["bat"]', AGYSCOPE_KEYMAP="vim")
@@ -97,13 +105,44 @@ class ConfigTest(unittest.TestCase):
         self.assertTrue(w)
 
     def test_broken_file_and_unknown_setting(self):
-        self.write("{not json")
+        self.write("keymap = \n")
         s, w = config.load({}, self.env)
         self.assertEqual(s["keymap"], "emacs")
         self.assertEqual(len(w), 1)
+        self.assertTrue(w[0].startswith("config "), w)
         self.write({"colour": "red"})
         _, w = config.load({}, self.env)
         self.assertIn("unknown setting", w[0])
+
+    def test_legacy_json_warns(self):
+        d = os.path.join(self.tmp, "agyscope")
+        os.makedirs(d, exist_ok=True)
+        with open(os.path.join(d, "config.json"), "w", encoding="utf-8") as f:
+            f.write('{"keymap": "vim"}\n')
+        s, w = config.load({}, self.env)
+        self.assertEqual(s["keymap"], "emacs")
+        self.assertEqual(w, [config.LEGACY_WARNING])
+
+    def test_legacy_json_ignored_when_toml_exists(self):
+        d = os.path.join(self.tmp, "agyscope")
+        os.makedirs(d, exist_ok=True)
+        with open(os.path.join(d, "config.json"), "w", encoding="utf-8") as f:
+            f.write('{"keymap": "vim"}\n')
+        self.write({"keymap": "emacs"})
+        s, w = config.load({}, self.env)
+        self.assertEqual(s["keymap"], "emacs")
+        self.assertEqual(w, [])
+
+    def test_legacy_check_skipped_with_env_override(self):
+        with open(os.path.join(self.tmp, "config.json"), "w", encoding="utf-8") as f:
+            f.write('{"keymap": "vim"}\n')
+        missing = os.path.join(self.tmp, "custom.toml")
+        _, w = config.load({}, {"AGYSCOPE_CONFIG": missing})
+        self.assertEqual(w, [])
+
+    def test_toml_dumps_round_trips(self):
+        d = {"keymap": "vim", "auto_open": False, "bounds": [0, 0.5, 1, 1], "keys": {"down": ["J"]}}
+        self.assertEqual(tomllib.loads(helpers.toml_dumps(d)), d)
 
     def test_bad_keys(self):
         _, w = config.load({"keys": {"jump": "x"}}, self.env)
@@ -112,9 +151,9 @@ class ConfigTest(unittest.TestCase):
         self.assertIn("bad key", w[0])
 
     def test_config_path_override(self):
-        p = os.path.join(self.tmp, "other.json")
-        with open(p, "w") as f:
-            json.dump({"keymap": "vim"}, f)
+        p = os.path.join(self.tmp, "other.toml")
+        with open(p, "w", encoding="utf-8") as f:
+            f.write(helpers.toml_dumps({"keymap": "vim"}))
         s, _ = config.load({}, {"AGYSCOPE_CONFIG": p})
         self.assertEqual(s["keymap"], "vim")
         s, _ = config.load({}, dict(self.env, AGY_SUBAGENT_CONFIG=p))
@@ -123,8 +162,48 @@ class ConfigTest(unittest.TestCase):
     def test_defaults_not_shared(self):
         s, _ = config.load({}, self.env)
         s["pager"].append("x")
+        s["columns"]["role"] = 99
         s2, _ = config.load({}, self.env)
         self.assertEqual(s2["pager"], ["less", "-R", "+G"])
+        self.assertEqual(s2["columns"], config.COLUMNS)
+
+    def test_columns_partial_merge(self):
+        self.write({"columns": {"role": 30}})
+        s, w = config.load({}, self.env)
+        self.assertEqual(w, [])
+        self.assertEqual(s["columns"], {**config.COLUMNS, "role": 30})
+
+    def test_columns_invalid_all_default(self):
+        for bad in ("bad", {"bogus": 5}, {"role": 7}, {"role": 81}, {"age": 2}, {"age": 11},
+                    {"state": True}, {"model": "x"}, {"role": 30, "age": 99}):
+            self.write({"columns": bad})
+            s, w = config.load({}, self.env)
+            self.assertEqual(s["columns"], config.COLUMNS, bad)
+            self.assertEqual(len(w), 1, (bad, w))
+
+    def test_columns_inclusive_bounds(self):
+        for col, (lo, hi) in config.COLUMN_LIMITS.items():
+            for bound in (lo, hi):
+                self.write({"columns": {col: bound}})
+                s, w = config.load({}, self.env)
+                self.assertEqual(w, [], (col, bound))
+                self.assertEqual(s["columns"][col], bound, (col, bound))
+
+    def test_theme_and_marquee(self):
+        self.write({"theme": "nord", "marquee": False})
+        s, w = config.load({}, self.env)
+        self.assertEqual(w, [])
+        self.assertEqual((s["theme"], s["marquee"]), ("nord", False))
+
+        s, w = config.load({"theme": "dracula", "marquee": True}, self.env)
+        self.assertEqual(w, [])
+        self.assertEqual((s["theme"], s["marquee"]), ("dracula", True))
+
+        self.write({"theme": "", "marquee": "no"})
+        s, w = config.load({}, self.env)
+        self.assertEqual(s["theme"], "textual-dark")
+        self.assertIs(s["marquee"], True)
+        self.assertEqual(len(w), 2, w)
 
 
 class RepoContractTest(unittest.TestCase):
@@ -132,9 +211,10 @@ class RepoContractTest(unittest.TestCase):
         wf_path = os.path.join(helpers.REPO, ".github", "workflows", "test.yml")
         with open(wf_path, encoding="utf-8") as f:
             wf = f.read()
-        self.assertIn('"3.10"', wf)
+        self.assertIn('"3.11"', wf)
         self.assertIn('"3.13"', wf)
         self.assertIn('"3.x"', wf)
+        self.assertNotIn('"3.10"', wf)
         self.assertNotIn('"3.9"', wf)
         self.assertIn("tests/run_all.sh py", wf)
         self.assertIn("setup-uv", wf)
@@ -144,9 +224,9 @@ class RepoContractTest(unittest.TestCase):
         with open(readme_path, encoding="utf-8") as f:
             readme = f.read()
         self.assertTrue(readme.startswith("# agyscope\n"))
-        self.assertIn("Python 3.10 or newer", readme)
+        self.assertIn("Python 3.11 or newer", readme)
         self.assertIn("uv tool install --editable", readme)
-        self.assertIn("~/.config/agyscope/config.json", readme)
+        self.assertIn("~/.config/agyscope/config.toml", readme)
         self.assertIn("AGYSCOPE_CONFIG", readme)
         self.assertIn("## Rex integration", readme)
         self.assertIn("agyscope-rex-hook", readme)
@@ -154,17 +234,50 @@ class RepoContractTest(unittest.TestCase):
         self.assertIn('rex.bind("alt+s", "agyscope")', readme)
         self.assertIn("--rex-block", readme)
         self.assertIn("Unofficial", readme)
+        self.assertIn("uv tool install agyscope", readme)
+        self.assertIn("uv tool upgrade agyscope", readme)
+        self.assertIn("uv tool uninstall agyscope", readme)
+        self.assertIn("uv tool install agyscope==0.2.1", readme)
+        self.assertIn("pipx install agyscope", readme)
         self.assertIn("uv tool install git+https://github.com/daehyeok/agyscope", readme)
         self.assertIn('require("plugins.agyscope")', readme)
+        self.assertIn('keys = { down = ["J"], close = "C-x" }', readme)
+        for required in ("## Themes", "examples/themes/catppuccin-mocha.toml", "~/.config/agyscope/themes/",
+                         "theme", "marquee", "[columns]", "--theme", "--no-marquee",
+                         "config.json is no longer read",
+                         "https://github.com/daehyeok/agyscope/blob/main/examples/config.toml",
+                         "https://github.com/daehyeok/agyscope/blob/main/integrations/rex/hooks.json",
+                         "https://github.com/daehyeok/agyscope/blob/main/LICENSE"):
+            self.assertIn(required, readme)
         for gone in ("AGY_SUBAGENT_", "bin/agy-subagent", "--block ", "agy_subagent", "3.9 or newer",
-                     "uv lock --upgrade --project", "hooks/hooks.json", "rex-agy-subagent"):
+                     "3.10 or newer", "uv lock --upgrade --project", "hooks/hooks.json", "rex-agy-subagent",
+                     "agyscope/config.json", '"keymap": "emacs"', '{"down": ["J"], "close": "C-x"}'):
             self.assertNotIn(gone, readme)
+        for target in re.findall(r"\]\(([^)]+)\)", readme):
+            self.assertTrue(
+                target.startswith(("https://", "#")),
+                f"README link/image must be absolute https:// or #anchor for PyPI rendering: {target}",
+            )
+
+    def test_changelog(self):
+        cl_path = os.path.join(helpers.REPO, "CHANGELOG.md")
+        self.assertTrue(os.path.isfile(cl_path), "CHANGELOG.md must exist")
+        with open(cl_path, encoding="utf-8") as f:
+            cl = f.read()
+        self.assertTrue(cl.startswith("# Changelog"))
+        for heading in ("## [0.2.1]", "## [0.2.0]", "## [0.1.0]", "BREAKING"):
+            self.assertIn(heading, cl)
+        sec_021 = cl[cl.index("## [0.2.1]"):cl.index("## [0.2.0]")]
+        self.assertIn("config.toml", sec_021)
+        self.assertIn("Python 3.11", sec_021)
+        self.assertIn("uv tool install agyscope", sec_021)
 
     def test_demo_gif_referenced_and_valid(self):
         readme_path = os.path.join(helpers.REPO, "README.md")
         with open(readme_path, encoding="utf-8") as f:
             readme = f.read()
-        self.assertIn("![demo](docs/demo.gif)", readme)
+        self.assertIn("![demo](https://raw.githubusercontent.com/daehyeok/agyscope/main/docs/demo.gif)", readme)
+        self.assertNotIn("![demo](docs/demo.gif)", readme)
         self.assertNotIn("TODO: demo GIF", readme)
 
         gif_path = os.path.join(helpers.REPO, "docs", "demo.gif")
@@ -173,6 +286,34 @@ class RepoContractTest(unittest.TestCase):
             header = f.read(6)
         self.assertIn(header, (b"GIF87a", b"GIF89a"))
         self.assertGreater(os.path.getsize(gif_path), 20_000)
+
+    def test_packaging_hygiene(self):
+        import tomllib
+
+        readme_path = os.path.join(helpers.REPO, "README.md")
+        with open(readme_path, encoding="utf-8") as f:
+            readme = f.read()
+        self.assertNotIn("docs/demo.gif` is stale", readme)
+
+        gitignore_path = os.path.join(helpers.REPO, ".gitignore")
+        with open(gitignore_path, encoding="utf-8") as f:
+            gitignore = f.read().splitlines()
+        for entry in ("dist/", "build/", "*.egg-info/", ".pytest_cache/"):
+            self.assertIn(entry, gitignore)
+
+        pyproject_path = os.path.join(helpers.REPO, "pyproject.toml")
+        with open(pyproject_path, "rb") as f:
+            pyproject = tomllib.load(f)
+        sdist_exclude = (
+            pyproject.get("tool", {})
+            .get("hatch", {})
+            .get("build", {})
+            .get("targets", {})
+            .get("sdist", {})
+            .get("exclude", [])
+        )
+        for excluded in ("docs/demo.gif", ".superpowers/"):
+            self.assertIn(excluded, sdist_exclude)
 
 
 if __name__ == "__main__":

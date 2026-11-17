@@ -10,12 +10,14 @@ open, found with lsof or /proc), then the Rex block pointer for --rex-block, the
 --conversation. The data directory comes from that lock (or the pointer) when there is one;
 --app-dir and the other settings are the fallback.
 
-Settings come from flags, then the config file ($AGYSCOPE_CONFIG or
-${XDG_CONFIG_HOME:-~/.config}/agyscope/config.json):
+Settings come from flags, then the TOML config file ($AGYSCOPE_CONFIG or
+${XDG_CONFIG_HOME:-~/.config}/agyscope/config.toml):
     --app-dir DIR          agent data directory (default ~/.gemini/antigravity-cli)
     --keymap emacs|vim     panel keys (default emacs)
     --keys-json JSON       extra keys: {"down": ["J"], ...}
-    --pager-json JSON      pager argv: ["bat", "--paging=always"]
+    --pager-json JSON          pager argv: ["bat", "--paging=always"]
+    --theme NAME               Textual or user theme name (default textual-dark)
+    --marquee / --no-marquee   scroll the highlighted row's Last step (default on)
 
 Rex integration:
     --rex-block BLOCK      follow the Rex block pointer and focus BLOCK after `close`
@@ -24,12 +26,14 @@ Rex integration:
 import argparse
 import collections
 import json
+import os
 import sys
 import traceback
 
 from . import config, discovery, resolve, textview
 
-Setup = collections.namedtuple("Setup", ("args", "settings", "warnings", "resolver", "tree", "on_close"))
+Setup = collections.namedtuple("Setup", ("args", "settings", "warnings", "resolver", "tree", "on_close",
+                                       "themes_dir"))
 
 
 def parse(argv):
@@ -44,12 +48,14 @@ def parse(argv):
     p.add_argument("--keymap")
     p.add_argument("--keys-json")
     p.add_argument("--pager-json")
+    p.add_argument("--theme")
+    p.add_argument("--marquee", action=argparse.BooleanOptionalAction, default=None)
     return p.parse_args(argv)
 
 
 def flags_of(args):
     warnings = []
-    flags = {"app_dir": args.app_dir, "keymap": args.keymap}
+    flags = {"app_dir": args.app_dir, "keymap": args.keymap, "theme": args.theme, "marquee": args.marquee}
     for name, raw in (("keys", args.keys_json), ("pager", args.pager_json)):
         if raw is None:
             continue
@@ -78,7 +84,8 @@ def setup(argv, env=None):
     resolver = resolve.Resolver(settings["app_dir"], pid=args.pid, conversation=args.conversation,
                                 fallback=fallback)
     tree = discovery.Tree(settings["app_dir"])
-    return Setup(args, settings, all_warnings, resolver, tree, on_close)
+    themes_dir = config.themes_dir(os.environ if env is None else env)
+    return Setup(args, settings, all_warnings, resolver, tree, on_close, themes_dir)
 
 
 def run_text(setup):

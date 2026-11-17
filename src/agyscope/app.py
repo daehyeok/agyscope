@@ -4,17 +4,19 @@ Started by agyscope.cli.main through run(). The panel only reads files; closing 
 nothing but the panel.
 """
 
+import copy
 import time
 
 from rich.text import Text
-from textual.app import App, SuspendNotSupported
+from textual.app import App, InvalidThemeError, SuspendNotSupported
 from textual.binding import Binding
 from textual.screen import Screen
 from textual.widgets import Static
 
-from . import discovery, keymap, pager, textview
+from . import config, discovery, keymap, pager, textview, themes
+from .themes import FALLBACK_STYLES
 from .viewstate import ViewState
-from .widgets import StepView, SubagentTree, header_columns
+from .widgets import MARQUEE_STEP_S, ColumnHeader, ColumnsChanged, StepView, SubagentTree
 
 REFRESH_S = 1.0
 _HINT_FIRST = {"open": "Enter", "back": "Esc"}  # action -> key the hints show when it is bound
@@ -25,9 +27,9 @@ class ListScreen(Screen):
 
     def compose(self):
         yield Static(Text(self.app.list_hints()), id="listhint")
-        yield Static(id="colhead")
+        yield ColumnHeader(id="colhead")
         yield Static(id="empty")
-        yield SubagentTree(id="tree")
+        yield SubagentTree(id="tree", state_styles=self.app.state_styles, cols=self.app.settings["columns"])
         yield Static(id="status")
 
     def on_mount(self) -> None:
@@ -36,15 +38,34 @@ class ListScreen(Screen):
         self.app.show_status()
         self.app.refresh_data()
         self.app.set_interval(REFRESH_S, self.app.refresh_data)
+        if self.app.settings["marquee"]:
+            self.set_interval(MARQUEE_STEP_S, self.tick_marquee)
+
+    def tick_marquee(self) -> None:
+        if self.app.screen is not self or not self.app.settings["marquee"]:
+            return
+        self.query_one("#tree", SubagentTree).tick_marquee()
 
     def on_resize(self, event) -> None:
         self.call_after_refresh(self.show_colhead)
 
     def show_colhead(self) -> None:
         """Column titles for the tree's current content width, so they line up with the rows."""
-        width = self.query_one("#tree", SubagentTree).scrollable_content_region.width
+        tree = self.query_one("#tree", SubagentTree)
+        width = tree.scrollable_content_region.width
         if width:
-            self.query_one("#colhead", Static).update(header_columns(width))
+            self.query_one("#colhead", ColumnHeader).show(width, tree.cols)
+
+    def on_columns_changed(self, message: ColumnsChanged) -> None:
+        tree = self.query_one("#tree", SubagentTree)
+        tree.cols = dict(message.cols)
+        tree.relabel()
+        self.show_colhead()
+
+    def on_screen_suspend(self, _event) -> None:
+        colhead = self.query_one_optional("#colhead", ColumnHeader)
+        if colhead is not None:
+            colhead.cancel_drag()
 
     def action(self, name: str) -> None:
         """close exits with True, open views the subagent under the cursor; the rest go to the tree."""
@@ -73,7 +94,9 @@ class ViewScreen(Screen):
         yield Static(Text(self.app.view_hints()), id="hints")
 
     def on_mount(self) -> None:
-        self.query_one("#steps", StepView).focus()
+        steps = self.query_one("#steps", StepView)
+        steps.state_styles = self.app.state_styles
+        steps.focus()
         self.app.show_status()
         self.app.show_view()
 
@@ -104,15 +127,17 @@ class AgyscopeApp(App):
     ]
     ENABLE_COMMAND_PALETTE = False  # its ctrl+p binding would shadow emacs `up`
 
-    def __init__(self, tree, resolver, settings, warnings=(), clock=time.time):
+    def __init__(self, tree, resolver, settings, warnings=(), clock=time.time, themes_dir=None):
         super().__init__()
         self.agents = tree  # discovery.Tree (App.tree is taken by Textual)
         self.resolver = resolver
-        self.settings = settings
+        self.settings = {**copy.deepcopy(config.DEFAULTS), **settings}
         self.clock = clock
+        self.themes_dir = themes_dir
+        self.state_styles = FALLBACK_STYLES
         self.status = list(warnings)
         try:
-            self.keys = keymap.build(settings["keymap"], settings["keys"])
+            self.keys = keymap.build(self.settings["keymap"], self.settings["keys"])
         except ValueError as e:
             self.status.append("keys: %s; using defaults" % e)
             self.keys = keymap.build("emacs")
@@ -120,6 +145,35 @@ class AgyscopeApp(App):
             self.status.append("keys: the terminal can't send %s; use another key" % k)
         self.views = {}  # subagent id -> ViewState
         self.rows = {}  # subagent id -> row from the last refresh
+
+    def on_mount(self) -> None:
+        if self.themes_dir:
+            loaded, warnings = themes.load_user_themes(self.themes_dir)
+            for theme in loaded:
+                self.register_theme(theme)
+            self.status.extend(warnings)
+        self.theme_changed_signal.subscribe(self, self._on_theme_changed)
+        name = self.settings["theme"]
+        try:
+            self.theme = name
+        except InvalidThemeError:
+            self.status.append("theme %r not found; using %s" % (name, self.theme))
+        self.state_styles = themes.styles_from(self.get_css_variables())
+
+    def _on_theme_changed(self, _theme) -> None:
+        self.state_styles = themes.styles_from(self.get_css_variables())
+        self.apply_state_styles()
+
+    def apply_state_styles(self) -> None:
+        if hasattr(self, "list_screen") and self.list_screen.is_mounted:
+            tree = self.list_screen.query_one("#tree", SubagentTree)
+            tree.state_styles = self.state_styles
+            tree.relabel()
+        if isinstance(self.screen, ViewScreen):
+            steps = self.screen.query_one_optional("#steps", StepView)
+            if steps is not None:
+                steps.state_styles = self.state_styles
+                steps.refresh()
 
     def get_default_screen(self) -> Screen:
         self.list_screen = ListScreen()  # stays at the bottom of the stack while a view is shown
@@ -225,7 +279,8 @@ def run(setup) -> int:
     Textual returns None with return_code 1 on an uncaught exception; that must not look like
     ctrl+c, so it becomes 2. Exceptions raised here propagate to cli.main.
     """
-    app = AgyscopeApp(setup.tree, setup.resolver, setup.settings, setup.warnings)
+    app = AgyscopeApp(setup.tree, setup.resolver, setup.settings, setup.warnings,
+                      themes_dir=getattr(setup, "themes_dir", None))
     result = app.run()
     if app.return_code:
         return 2

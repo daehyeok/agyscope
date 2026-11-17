@@ -1,0 +1,29 @@
+## Example configuration for agyscope (~/.config/agyscope/config.toml).
+## Every option below shows its default (except `theme`, shown with the
+## Catppuccin Mocha example).
+
+# app_dir = "~/.gemini/antigravity-cli"
+# keymap = "emacs"
+# pager = ["less", "-R", "+G"]
+# theme = "catppuccin-mocha"
+# marquee = true
+
+## Rex hook (read by agyscope-rex-hook; ignored by agyscope)
+# bounds = [0.6, 0.04, 0.38, 0.42]
+# auto_open = true
+# interactive = true
+# command = ["agyscope"]
+
+## Extra key bindings per action, added to the keymap preset.
+# [keys]
+## down = ["J"]
+## up = ["K"]
+## close = "C-x"
+
+## Initial list column widths in cells (session drags are not saved).
+## Limits: role 8..80, state 4..20, model 6..60, age 3..10.
+# [columns]
+# role = 24
+# state = 8
+# model = 22
+# age = 5

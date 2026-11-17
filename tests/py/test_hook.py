@@ -131,8 +131,8 @@ class HookTest(unittest.TestCase):
     def write_config(self, data):
         d = os.path.join(self.tmp, "config", "agyscope")
         os.makedirs(d, exist_ok=True)
-        with open(os.path.join(d, "config.json"), "w") as f:
-            json.dump(data, f)
+        with open(os.path.join(d, "config.toml"), "w", encoding="utf-8") as f:
+            f.write(helpers.toml_dumps(data))
 
     def test_command_from_config(self):
         self.write_config({"command": ["/opt/a/agyscope", "--keymap", "vim"]})

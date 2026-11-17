@@ -3,6 +3,8 @@
 import tempfile
 import unittest
 
+from unittest import mock
+
 import helpers  # noqa: F401
 import make_fixtures as fx
 from agyscope import discovery
@@ -19,10 +21,14 @@ except ImportError:
 
 if HAVE_TEXTUAL:
     # outside the try: a missing widget must fail, not skip
+    from rich.style import Style
     from textual.geometry import Region
 
-    from agyscope.widgets import (COLS, MODEL_MIN, STYLES, TEXT_MIN, StepView, SubagentTree,
-                                         header_columns, row_columns, visible_cols)
+    from agyscope.themes import FALLBACK_STYLES
+    from agyscope.widgets import (DEFAULT_COLS, MARQUEE_PAUSE_TICKS, MODEL_MIN, TEXT_MIN, ColumnHeader,
+                                  ColumnsChanged, StepView, SubagentTree, _short_age, column_borders,
+                                  header_columns, marquee_span, marquee_window, row_columns, text_width,
+                                  visible_cols)
 
 SIZE = (80, 12)
 ROW = {"id": "c1", "role": "Final Review Fixer", "state": "done", "model": "gemini-3.8-flash-tiered"}
@@ -153,6 +159,14 @@ class StepViewTest(unittest.IsolatedAsyncioTestCase):
             self.assertTrue(list(view.render_line(1))[0].style.reverse)
             self.assertFalse(list(view.render_line(0))[0].style.reverse)
 
+    async def test_state_styles_used(self):
+        async with Host().run_test(size=SIZE) as pilot:
+            view = pilot.app.query_one(StepView)
+            view.state_styles = dict(FALLBACK_STYLES, step=Style(color="#abcdef", bold=True))
+            view.show(ROW, items(1), ViewState())
+            seg = list(view.render_line(0))[0]
+            self.assertEqual(seg.style.color.name, "#abcdef")
+
 
 def fixture_groups():
     """discovery groups for the shared fixture: Working = Planner > Checker, Completed = Reviewer."""
@@ -182,12 +196,13 @@ if HAVE_TEXTUAL:
     class TreeHost(App):
         """Mounts one SubagentTree and records the messages it posts."""
 
-        def __init__(self):
+        def __init__(self, cols=None):
             super().__init__()
+            self.cols = cols
             self.posted = []
 
         def compose(self):
-            yield SubagentTree()
+            yield SubagentTree(cols=self.cols)
 
         def on_subagent_tree_selected(self, message):
             self.posted.append(("selected", message.id))
@@ -355,6 +370,17 @@ class SubagentTreeTest(unittest.IsolatedAsyncioTestCase):
             await pilot.pause()
             self.assertEqual(pilot.app.posted[-1], ("selected", fx.REVIEWER))
 
+    async def test_relabel_recolors(self):
+        async with TreeHost().run_test(size=(100, 12)) as pilot:
+            tree = pilot.app.query_one(SubagentTree)
+            tree.update_groups(fixture_groups())
+            await pilot.pause()
+            custom = Style(color="#123456")
+            tree.state_styles = dict(FALLBACK_STYLES, done=custom)
+            tree.relabel()
+            reviewer = find(tree.root, fx.REVIEWER)
+            self.assertIn(custom, [span.style for span in reviewer.label.spans])
+
 
 def with_models(groups, **models):
     """`groups` with each row's model set from models[role] (other rows keep theirs)."""
@@ -393,7 +419,7 @@ class ColumnsTreeTest(unittest.IsolatedAsyncioTestCase):
             model_cols = {col_of(line, CARBON) for line in (planner, checker, reviewer)}
             self.assertEqual(len(model_cols), 1, lines)
             state_cols = {col_of(planner, "waiting"), col_of(checker, "working"), col_of(reviewer, "done")}
-            self.assertEqual(state_cols, {COLS["role"] + 1}, lines)
+            self.assertEqual(state_cols, {DEFAULT_COLS["role"] + 1}, lines)
             header = header_columns(tree.size.width).plain
             self.assertEqual(model_cols, {header.index("Model")})
 
@@ -425,13 +451,21 @@ class ColumnsTreeTest(unittest.IsolatedAsyncioTestCase):
             self.assertRegex(planner.rstrip(), r" \d+[smhd]$")  # Age is still the last column
             self.assertLessEqual(tree.virtual_size.width, tree.size.width)  # nothing past the right edge
 
+    async def test_tree_cols(self):
+        async with TreeHost(cols=dict(DEFAULT_COLS, role=30)).run_test(size=(100, 12)) as pilot:
+            tree = pilot.app.query_one(SubagentTree)
+            tree.update_groups(fixture_groups())
+            await pilot.pause()
+            planner = line_of(screen_lines(tree), "Planner")
+            self.assertEqual(col_of(planner, "waiting"), 31)
+
 
 @unittest.skipUnless(HAVE_TEXTUAL, "textual not installed")
 class ColumnsTest(unittest.TestCase):
     def test_narrow_drops_columns(self):
         every = ("role", "state", "model", "age", "text")
-        fixed = COLS["role"] + 1 + COLS["state"] + 1 + COLS["age"]  # role, state and age always fit
-        text_from = fixed + 1 + COLS["model"] + 1 + TEXT_MIN
+        fixed = DEFAULT_COLS["role"] + 1 + DEFAULT_COLS["state"] + 1 + DEFAULT_COLS["age"]
+        text_from = fixed + 1 + DEFAULT_COLS["model"] + 1 + TEXT_MIN
         model_from = fixed + 1 + MODEL_MIN
         self.assertEqual(visible_cols(100), every)
         self.assertEqual(visible_cols(text_from), every)
@@ -451,13 +485,13 @@ class ColumnsTest(unittest.TestCase):
         for width in range(40, 91):
             header = header_columns(width).plain
             self.assertTrue(header.endswith("Age") or header.rstrip().endswith("Last step"), (width, header))
-            for label_width in (COLS["role"] - 6, COLS["role"] - 10):
-                shift = COLS["role"] - label_width
+            for label_width in (DEFAULT_COLS["role"] - 6, DEFAULT_COLS["role"] - 10):
+                shift = DEFAULT_COLS["role"] - label_width
                 plain = row_columns(row, label_width, width).plain
                 self.assertLessEqual(col_width(plain), width - shift, (width, plain))
                 self.assertEqual(header.index("Age") + 3, shift + plain.index("4m") + 2, (width, plain))
                 if "model" in visible_cols(width):
-                    model = plain[plain.index("waiting") + COLS["state"]:plain.index("4m")].strip()
+                    model = plain[plain.index("waiting") + DEFAULT_COLS["state"]:plain.index("4m")].strip()
                     self.assertTrue(model.startswith("gemini") and model.endswith("…"), (width, plain))
                     self.assertEqual(header.index("Model"), shift + plain.index("gemini"))
                 else:
@@ -468,15 +502,15 @@ class ColumnsTest(unittest.TestCase):
         for age, shown in (("4m", "4m"), ("59s", "59s"), ("9h59m", "9h59m"), ("12h05m", "12h"),
                            ("99h59m", "99h"), ("100h00m", "4d"), ("7664h36m", "319d")):
             plain = row_columns(dict(ROLE_ROW, age=age), 18, 100).plain
-            self.assertIn(" %s Plan written." % shown.rjust(COLS["age"]), plain, age)
+            self.assertIn(" %s Plan written." % shown.rjust(DEFAULT_COLS["age"]), plain, age)
             self.assertNotIn("…", plain, age)
 
     def test_header_matches_rows(self):
         header = header_columns(100)
         self.assertTrue(header.plain.startswith("Subagent "))
-        for label_width in (COLS["role"] - 6, COLS["role"] - 10):
+        for label_width in (DEFAULT_COLS["role"] - 6, DEFAULT_COLS["role"] - 10):
             row = row_columns(ROLE_ROW, label_width, 100).plain
-            shift = COLS["role"] - label_width  # the row label starts after the tree guides and icon
+            shift = DEFAULT_COLS["role"] - label_width  # the row label starts after the tree guides and icon
             self.assertEqual(header.plain.index("State"), shift + row.index("waiting"))
             self.assertEqual(header.plain.index("Model"), shift + row.index(CARBON))
             self.assertEqual(header.plain.index("Age") + 3, shift + row.index("4m") + 2)  # right-aligned
@@ -487,22 +521,312 @@ class ColumnsTest(unittest.TestCase):
     def test_wide_chars_truncate(self):
         row = {"id": "x", "depth": 0, "parent": None, "role": "한글로 된 아주 긴 검토자 역할", "state": "working",
                "model": "모델 이름이 아주 긴 한글 모델입니다", "age": "3m", "text": "한글로 된 아주 긴 마지막 단계 설명입니다"}
-        label_width = COLS["role"] - 6
+        label_width = DEFAULT_COLS["role"] - 6
         for total in (61, 62, 80, 100):
             label = row_columns(row, label_width, total)
             plain = label.plain
-            self.assertLessEqual(col_width(plain), total - (COLS["role"] - label_width))
+            self.assertLessEqual(col_width(plain), total - (DEFAULT_COLS["role"] - label_width))
             role, rest = plain[:plain.index(" working")], plain[plain.index(" working"):]
             self.assertTrue(role.rstrip().endswith("…"))
             self.assertEqual(col_width(role), label_width)  # padded when a wide char doesn't fit
-            self.assertIn(STYLES["working"], [span.style for span in label.spans])
+            self.assertIn(FALLBACK_STYLES["working"], [span.style for span in label.spans])
             self.assertIn("…", rest)
         wide = row_columns(row, label_width, 200).plain
         model = wide[wide.index("모델"):]
-        self.assertEqual(col_of(wide, "3m") - col_of(wide, "모델"), COLS["model"] + 1 + COLS["age"] - 2)
+        self.assertEqual(col_of(wide, "3m") - col_of(wide, "모델"),
+                         DEFAULT_COLS["model"] + 1 + DEFAULT_COLS["age"] - 2)
         self.assertTrue(model.startswith("모델 이름이 아주"))
         self.assertTrue(wide.endswith("설명입니다"))
         self.assertNotIn("-", row_columns(dict(row, model="-"), label_width, 200).plain)
+
+    def test_row_columns_uses_given_styles(self):
+        custom = Style(color="#123456")
+        row = dict(ROLE_ROW, state="working")
+        label = row_columns(row, 18, 100, state_styles={"working": custom})
+        self.assertIn(custom, [span.style for span in label.spans])
+
+    def test_custom_cols_visible_and_aligned(self):
+        cols = dict(DEFAULT_COLS, role=30, model=10)
+        fixed = cols["role"] + 1 + cols["state"] + 1 + cols["age"]
+        self.assertIn("text", visible_cols(fixed + 1 + 10 + 1 + TEXT_MIN, cols))
+        self.assertNotIn("text", visible_cols(fixed + 1 + 10 + TEXT_MIN, cols))
+        row_plain = row_columns(ROLE_ROW, 24, 120, cols=cols).plain
+        self.assertEqual(row_plain.index("waiting"), 30 - (30 - 24) + 1)
+        self.assertEqual(header_columns(120, cols).plain.index("State"), 31)
+
+    def test_column_borders_match_header(self):
+        titles = {"state": "State", "model": "Model", "age": "Age", "text": "Last step"}
+        custom = dict(DEFAULT_COLS, role=30, model=10)
+        for cols in (DEFAULT_COLS, custom):
+            for width in (100, 60):
+                header = header_columns(width, cols).plain
+                borders = column_borders(width, cols)
+                self.assertNotIn("text", borders)
+                vis = visible_cols(width, cols)
+                for col, x in borders.items():
+                    self.assertEqual(header[x], " ", (width, cols, col, x, header))
+                    next_col = vis[vis.index(col) + 1]
+                    title = titles[next_col]
+                    if next_col == "age":
+                        title = title.rjust(cols["age"])
+                    self.assertTrue(header[x + 1:].startswith(title), (width, cols, col, x, header))
+
+    def test_short_age_uses_width(self):
+        self.assertEqual(_short_age("12h05m", 3), "12h")
+
+
+if HAVE_TEXTUAL:
+    class HeaderHost(App):
+        """Mounts one ColumnHeader and records ColumnsChanged messages."""
+
+        def __init__(self):
+            super().__init__()
+            self.posted = []
+
+        def compose(self):
+            yield ColumnHeader()
+
+        def on_columns_changed(self, message):
+            self.posted.append(message.cols)
+
+
+@unittest.skipUnless(HAVE_TEXTUAL, "textual not installed")
+class ColumnHeaderTest(unittest.IsolatedAsyncioTestCase):
+    async def test_drag_resizes_and_clamps(self):
+        async with HeaderHost().run_test(size=(100, 12)) as pilot:
+            hdr = pilot.app.query_one(ColumnHeader)
+            self.assertFalse(hdr.can_focus)
+            hdr.show(100, DEFAULT_COLS)
+            await pilot.mouse_down(ColumnHeader, offset=(24, 0))
+            await pilot.hover(ColumnHeader, offset=(30, 0))
+            await pilot.mouse_up(ColumnHeader, offset=(30, 0))
+            self.assertEqual(pilot.app.posted[-1]["role"], 30)
+
+            await pilot.mouse_down(ColumnHeader, offset=(30, 0))
+            await pilot.hover(ColumnHeader, offset=(90, 0))
+            await pilot.mouse_up(ColumnHeader, offset=(90, 0))
+            self.assertEqual(pilot.app.posted[-1]["role"], 80)
+
+            await pilot.mouse_down(ColumnHeader, offset=(80, 0))
+            await pilot.hover(ColumnHeader, offset=(1, 0))
+            await pilot.mouse_up(ColumnHeader, offset=(1, 0))
+            self.assertEqual(pilot.app.posted[-1]["role"], 8)
+
+    async def test_drag_off_border_does_nothing(self):
+        async with HeaderHost().run_test(size=(100, 12)) as pilot:
+            hdr = pilot.app.query_one(ColumnHeader)
+            hdr.show(100, DEFAULT_COLS)
+            await pilot.mouse_down(ColumnHeader, offset=(10, 0))
+            await pilot.hover(ColumnHeader, offset=(20, 0))
+            await pilot.mouse_up(ColumnHeader, offset=(20, 0))
+            self.assertEqual(pilot.app.posted, [])
+
+    async def test_drag_state_border(self):
+        async with HeaderHost().run_test(size=(100, 12)) as pilot:
+            hdr = pilot.app.query_one(ColumnHeader)
+            hdr.show(100, DEFAULT_COLS)
+            await pilot.mouse_down(ColumnHeader, offset=(33, 0))
+            await pilot.hover(ColumnHeader, offset=(40, 0))
+            await pilot.mouse_up(ColumnHeader, offset=(40, 0))
+            self.assertEqual(pilot.app.posted[-1]["state"], 15)
+
+    async def test_hover_marks_border(self):
+        async with HeaderHost().run_test(size=(100, 12)) as pilot:
+            hdr = pilot.app.query_one(ColumnHeader)
+            hdr.show(100, DEFAULT_COLS)
+            await pilot.hover(ColumnHeader, offset=(24, 0))
+            self.assertEqual(str(hdr.content)[24], "┃")
+
+    async def test_leave_mid_drag_releases_mouse(self):
+        async with HeaderHost().run_test(size=(100, 12)) as pilot:
+            hdr = pilot.app.query_one(ColumnHeader)
+            hdr.show(100, DEFAULT_COLS)
+            await pilot.mouse_down(ColumnHeader, offset=(24, 0))
+            self.assertIs(pilot.app.mouse_captured, hdr)
+            hdr.post_message(events.Leave(hdr))
+            await pilot.pause()
+            self.assertIsNone(pilot.app.mouse_captured)
+            self.assertIsNone(hdr._drag)
+
+
+@unittest.skipUnless(HAVE_TEXTUAL, "textual not installed")
+class MarqueeHelpersTest(unittest.TestCase):
+    def test_marquee_span(self):
+        self.assertEqual(marquee_span("short", 10), 0)
+        self.assertEqual(marquee_span("exact10chr", 10), 0)
+        self.assertEqual(marquee_span("0123456789abcdef", 10), 6)
+        self.assertEqual(marquee_span("가나다라마", 6), 4)
+        self.assertEqual(marquee_span("0123456789abcdef", 0), 0)
+
+    def test_marquee_window_ascii_and_short(self):
+        text = "0123456789abcdef"
+        self.assertEqual(marquee_window(text, 10, 0), "0123456789")
+        self.assertEqual(marquee_window(text, 10, 1), "123456789a")
+        self.assertEqual(marquee_window(text, 10, 6), "6789abcdef")
+        self.assertEqual(marquee_window(text, 10, 99), "6789abcdef")
+        self.assertEqual(marquee_window("hi", 6, 0), "hi    ")
+        self.assertEqual(marquee_window(text, 0, 0), "")
+
+    def test_marquee_window_cjk_never_splits_wide_char(self):
+        # "가나다" = 6 cells, width = 4 -> span = 2
+        self.assertEqual(marquee_window("가나다", 4, 0), "가나")
+        self.assertEqual(marquee_window("가나다", 4, 1), " 나 ")
+        self.assertEqual(marquee_window("가나다", 4, 2), "나다")
+        # "a가나다" = 7 cells, width = 4 -> span = 3
+        self.assertEqual(marquee_window("a가나다", 4, 0), "a가 ")
+        self.assertEqual(marquee_window("a가나다", 4, 1), "가나")
+        self.assertEqual(marquee_window("a가나다", 4, 2), " 나 ")
+        self.assertEqual(marquee_window("a가나다", 4, 3), "나다")
+        for off in range(4):
+            self.assertEqual(col_width(marquee_window("a가나다", 4, off)), 4)
+
+    def test_text_width(self):
+        fixed = DEFAULT_COLS["role"] + 1 + DEFAULT_COLS["state"] + 1 + DEFAULT_COLS["age"]
+        text_from = fixed + 1 + DEFAULT_COLS["model"] + 1 + TEXT_MIN
+        self.assertEqual(text_width(text_from - 1), 0)
+        self.assertEqual(text_width(text_from), TEXT_MIN)
+        self.assertEqual(text_width(100), 100 - (fixed + 1 + DEFAULT_COLS["model"] + 1))
+
+    def test_row_columns_text_offset(self):
+        total = 80
+        w = text_width(total)
+        long_text = "".join(chr(ord("a") + i) for i in range(w + 5))
+        row = dict(ROLE_ROW, text=long_text)
+        base = row_columns(row, DEFAULT_COLS["role"] - 2, total).plain
+        self.assertTrue(base.endswith("…"))
+        scrolled = row_columns(row, DEFAULT_COLS["role"] - 2, total, text_offset=2).plain
+        self.assertNotIn("…", scrolled)
+        self.assertTrue(scrolled.endswith(long_text[2:2 + w]))
+
+
+@unittest.skipUnless(HAVE_TEXTUAL, "textual not installed")
+class SubagentTreeMarqueeTest(unittest.IsolatedAsyncioTestCase):
+    def _rows(self, text0, text1="short"):
+        return [("Working", [
+            {"id": "r0", "depth": 0, "parent": None, "role": "First", "state": "working",
+             "model": "-", "age": "1m", "text": text0},
+            {"id": "r1", "depth": 0, "parent": None, "role": "Second", "state": "working",
+             "model": "-", "age": "2m", "text": text1},
+        ]), ("Completed", [])]
+
+    async def test_pause_advance_end_pause_wrap_and_only_cursor_animates(self):
+        async with TreeHost().run_test(size=(90, 12)) as pilot:
+            tree = pilot.app.query_one(SubagentTree)
+            w = text_width(tree.scrollable_content_region.width)
+            long0 = "".join(chr(ord("a") + i) for i in range(w + 4))
+            long1 = "".join(chr(ord("A") + i) for i in range(w + 4))
+            tree.update_groups(self._rows(long0, long1))
+            await pilot.pause()
+            n0, n1 = find(tree.root, "r0"), find(tree.root, "r1")
+            self.assertTrue(n0.label.plain.endswith("…"))
+            self.assertTrue(n1.label.plain.endswith("…"))
+
+            with mock.patch.object(n0, "set_label", wraps=n0.set_label) as spy0, \
+                    mock.patch.object(n1, "set_label", wraps=n1.set_label) as spy1:
+                for _ in range(MARQUEE_PAUSE_TICKS - 1):
+                    self.assertFalse(tree.tick_marquee())
+                self.assertEqual(spy0.call_count, 0)
+                self.assertTrue(n0.label.plain.endswith("…"))
+
+                for off in range(1, 5):
+                    self.assertTrue(tree.tick_marquee())
+                    self.assertTrue(n0.label.plain.endswith(long0[off:off + w]), (off, n0.label.plain))
+                    self.assertNotIn("…", n0.label.plain)
+
+                for _ in range(MARQUEE_PAUSE_TICKS - 1):
+                    self.assertFalse(tree.tick_marquee())
+                self.assertTrue(n0.label.plain.endswith(long0[4:4 + w]))
+
+                self.assertTrue(tree.tick_marquee())  # wrap back to 0
+                self.assertTrue(n0.label.plain.endswith("…"))
+                self.assertEqual(spy1.call_count, 0)
+                self.assertTrue(n1.label.plain.endswith("…"))
+
+    async def test_short_text_group_and_narrow_do_nothing(self):
+        async with TreeHost().run_test(size=(90, 12)) as pilot:
+            tree = pilot.app.query_one(SubagentTree)
+            tree.update_groups(self._rows("short", "also short"))
+            await pilot.pause()
+            n0 = find(tree.root, "r0")
+            with mock.patch.object(n0, "set_label", wraps=n0.set_label) as spy0:
+                for _ in range(MARQUEE_PAUSE_TICKS + 5):
+                    self.assertFalse(tree.tick_marquee())
+                self.assertEqual(spy0.call_count, 0)
+            tree.action("first")  # Working group header
+            self.assertIsNone(tree.selected_id())
+            self.assertFalse(tree.tick_marquee())
+
+    async def test_resets_on_move_text_change_cols_and_width(self):
+        async with TreeHost().run_test(size=(90, 12)) as pilot:
+            tree = pilot.app.query_one(SubagentTree)
+            w = text_width(tree.scrollable_content_region.width)
+            long0 = "0123456789" + "x" * w
+            long1 = "ABCDEFGHIJ" + "y" * w
+            tree.update_groups(self._rows(long0, long1))
+            await pilot.pause()
+            for _ in range(MARQUEE_PAUSE_TICKS + 1):
+                tree.tick_marquee()
+            n0 = find(tree.root, "r0")
+            self.assertNotIn("…", n0.label.plain)
+
+            # Cursor move resets old node back to "…" and starts new node at offset 0
+            tree.action("down")
+            await pilot.pause()
+            self.assertTrue(n0.label.plain.endswith("…"))
+            self.assertEqual(tree._marquee_offset, 0)
+            tree.action("up")
+            await pilot.pause()
+            for _ in range(MARQUEE_PAUSE_TICKS - 1):
+                self.assertFalse(tree.tick_marquee())  # full pause required again
+
+            # Advance to offset 2, refresh with same text -> keeps offset 2
+            for _ in range(2):
+                tree.tick_marquee()
+            self.assertEqual(tree._marquee_offset, 2)
+            tree.update_groups(self._rows(long0, long1))
+            self.assertEqual(tree._marquee_offset, 2)
+            self.assertTrue(n0.label.plain.endswith(long0[2:2 + w]))
+
+            # Refresh with changed text -> resets to offset 0
+            new0 = "NEWTEXT000" + "z" * w
+            tree.update_groups(self._rows(new0, long1))
+            self.assertEqual(tree._marquee_offset, 0)
+            self.assertTrue(n0.label.plain.endswith("…"))
+
+            # Column resize resets to offset 0
+            for _ in range(MARQUEE_PAUSE_TICKS + 1):
+                tree.tick_marquee()
+            self.assertEqual(tree._marquee_offset, 2)
+            tree.cols = dict(tree.cols, role=tree.cols["role"] + 2)
+            tree.relabel()
+            self.assertEqual(tree._marquee_offset, 0)
+
+            # Width resize resets to offset 0
+            for _ in range(MARQUEE_PAUSE_TICKS + 1):
+                tree.tick_marquee()
+            self.assertEqual(tree._marquee_offset, 2)
+            await pilot.resize_terminal(100, 12)
+            await pilot.pause()
+            self.assertEqual(tree._marquee_offset, 0)
+
+    async def test_cjk_marquee_in_tree(self):
+        async with TreeHost().run_test(size=(90, 12)) as pilot:
+            tree = pilot.app.query_one(SubagentTree)
+            w = text_width(tree.scrollable_content_region.width)
+            cjk = "가나다라마바사아자차카타파하" * 3
+            span = marquee_span(cjk, w)
+            self.assertGreater(span, 2)
+            tree.update_groups(self._rows(cjk))
+            await pilot.pause()
+            n0 = find(tree.root, "r0")
+            for _ in range(MARQUEE_PAUSE_TICKS):
+                tree.tick_marquee()
+            self.assertEqual(tree._marquee_offset, 1)
+            self.assertNotIn("…", n0.label.plain)
+            for _ in range(span - 1):
+                tree.tick_marquee()
+            self.assertEqual(tree._marquee_offset, span)
+            self.assertTrue(n0.label.plain.endswith(marquee_window(cjk, w, span)))
 
 
 if __name__ == "__main__":

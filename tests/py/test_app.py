@@ -22,7 +22,8 @@ if HAVE_TEXTUAL:
     # outside the try: a missing app module must fail, not skip
     from agyscope import app as app_mod
     from agyscope.app import AgyscopeApp, ListScreen, ViewScreen
-    from agyscope.widgets import StepView, SubagentTree, header_columns
+    from agyscope.widgets import (MARQUEE_PAUSE_TICKS, StepView, SubagentTree, header_columns,
+                                  marquee_span, marquee_window, text_width)
 
 SIZE = (120, 30)
 NOW = time.time()
@@ -55,12 +56,13 @@ def find(node, cid):
 FIXTURE_SHAPE = [("Working", [(fx.PLANNER, [(fx.CHECKER, [])])]), ("Completed", [(fx.REVIEWER, [])])]
 
 
-def make_app(root=fx.ROOT, settings=SETTINGS, warnings=(), fixture=True):
+def make_app(root=fx.ROOT, settings=SETTINGS, warnings=(), fixture=True, themes_dir=None):
     app_dir = tempfile.mkdtemp()
     if fixture:
         fx.build_tree(app_dir)
     resolver = FakeResolver(root, app_dir)
-    return AgyscopeApp(discovery.Tree(app_dir), resolver, settings, warnings=warnings, clock=lambda: NOW)
+    return AgyscopeApp(discovery.Tree(app_dir), resolver, settings, warnings=warnings,
+                       clock=lambda: NOW, themes_dir=themes_dir)
 
 
 def text_of(static):
@@ -77,6 +79,14 @@ async def start(pilot, app):
     app.refresh_data()
     await pilot.pause()
     return app.query_one("#tree", SubagentTree)
+
+
+async def wait_until(pilot, cond, timeout=5.0):
+    """Pauses until cond() holds or `timeout` seconds pass; returns cond()."""
+    deadline = time.monotonic() + timeout
+    while not cond() and time.monotonic() < deadline:
+        await pilot.pause(0.02)
+    return cond()
 
 
 async def open_view(pilot, app, downs=0, key="enter"):
@@ -202,6 +212,262 @@ class ListScreenTest(unittest.IsolatedAsyncioTestCase):
         async with app.run_test(size=SIZE) as pilot:
             self.assertIn("using defaults", text_of(app.query_one("#status")))
             self.assertEqual(app.keys.get("q"), "close")
+
+    async def test_drag_resizes_tree_and_header(self):
+        from textual.geometry import Region
+        from agyscope.transcript import col_width
+        app = make_app()
+        async with app.run_test(size=SIZE) as pilot:
+            tree = await start(pilot, app)
+            await pilot.mouse_down("#colhead", offset=(24, 0))
+            await pilot.hover("#colhead", offset=(34, 0))
+            await pilot.mouse_up("#colhead", offset=(34, 0))
+            await pilot.pause()
+            self.assertEqual(tree.cols["role"], 34)
+            head = text_of(app.query_one("#colhead"))
+            self.assertEqual(head.index("State"), 35)
+            lines = [s.text for s in tree.render_lines(Region(0, 0, tree.size.width, tree.size.height))]
+            reviewer = next(line for line in lines if "Reviewer" in line)
+            self.assertEqual(col_width(reviewer[:reviewer.index("done")]), 35)
+
+    async def test_open_view_mid_drag_releases_mouse(self):
+        app = make_app()
+        async with app.run_test(size=SIZE) as pilot:
+            await start(pilot, app)
+            colhead = app.list_screen.query_one("#colhead")
+            await pilot.mouse_down("#colhead", offset=(24, 0))
+            self.assertIsNotNone(app.mouse_captured)
+            await pilot.press("enter")
+            await pilot.pause()
+            self.assertIsInstance(app.screen, ViewScreen)
+            self.assertIsNone(app.mouse_captured)
+            self.assertIsNone(colhead._drag)
+
+
+@unittest.skipUnless(HAVE_TEXTUAL, "textual not installed")
+class ThemeTest(unittest.IsolatedAsyncioTestCase):
+    async def test_theme_applied_at_mount(self):
+        import rich.color
+        app = make_app(settings=dict(SETTINGS, theme="nord"))
+        async with app.run_test(size=SIZE) as pilot:
+            await start(pilot, app)
+            self.assertEqual(app.theme, "nord")
+            # nord success is #A3BE8C
+            self.assertEqual(app.state_styles["done"].color, rich.color.Color.parse("#A3BE8C"))
+
+    async def test_unknown_theme_warns(self):
+        app = make_app(settings=dict(SETTINGS, theme="nope"))
+        async with app.run_test(size=SIZE) as pilot:
+            await start(pilot, app)
+            self.assertEqual(app.theme, "textual-dark")
+            status = app.query_one("#status")
+            self.assertTrue(status.display)
+            self.assertIn("theme 'nope'", text_of(status))
+
+    async def test_user_theme_registered(self):
+        import rich.color
+        tdir = tempfile.mkdtemp()
+        with open(os.path.join(tdir, "mine.toml"), "w", encoding="utf-8") as f:
+            f.write('primary = "#010203"\nsuccess = "#0a0b0c"\n')
+        app = make_app(settings=dict(SETTINGS, theme="mine"), themes_dir=tdir)
+        async with app.run_test(size=SIZE) as pilot:
+            await start(pilot, app)
+            self.assertEqual(app.theme, "mine")
+            self.assertEqual(app.state_styles["done"].color, rich.color.Color.parse("#0a0b0c"))
+
+    async def test_bad_user_theme_warns(self):
+        tdir = tempfile.mkdtemp()
+        with open(os.path.join(tdir, "bad.toml"), "w", encoding="utf-8") as f:
+            f.write("primary = \n")
+        app = make_app(themes_dir=tdir)
+        async with app.run_test(size=SIZE) as pilot:
+            await start(pilot, app)
+            status = app.query_one("#status")
+            self.assertTrue(status.display)
+            self.assertIn("bad.toml", text_of(status))
+
+    async def test_bad_color_user_theme_does_not_crash(self):
+        tdir = tempfile.mkdtemp()
+        with open(os.path.join(tdir, "bad.toml"), "w", encoding="utf-8") as f:
+            f.write('primary = "not-a-color"\n')
+        app = make_app(settings=dict(SETTINGS, theme="bad"), themes_dir=tdir)
+        async with app.run_test(size=SIZE) as pilot:
+            await start(pilot, app)
+            self.assertEqual(app.theme, "textual-dark")
+            status = app.query_one("#status")
+            self.assertTrue(status.display)
+            msg = text_of(status)
+            self.assertTrue("theme 'bad'" in msg or "skipped" in msg, msg)
+
+    async def test_theme_switch_relabels(self):
+        import rich.color
+        app = make_app()
+        async with app.run_test(size=SIZE) as pilot:
+            tree = await start(pilot, app)
+            app.theme = "nord"
+            await pilot.pause()
+            await pilot.pause()
+            reviewer = find(tree.root, fx.REVIEWER)
+            nord_done = rich.color.Color.parse("#A3BE8C")
+            self.assertIn(nord_done, [span.style.color for span in reviewer.label.spans if span.style])
+
+
+@unittest.skipUnless(HAVE_TEXTUAL, "textual not installed")
+class MarqueeAppTest(unittest.IsolatedAsyncioTestCase):
+    """Marquee timing is driven deterministically by the test, not the wall clock."""
+
+    def setUp(self):
+        for name in ("REFRESH_S", "MARQUEE_STEP_S"):
+            patcher = mock.patch.object(app_mod, name, 3600.0)
+            patcher.start()
+            self.addCleanup(patcher.stop)
+
+    def _with_texts(self, app, **by_id):
+        orig = app.agents.rows(now=NOW)
+        return [(name, [dict(r, text=by_id[r["id"]]) if r["id"] in by_id else r for r in grp])
+                for name, grp in orig]
+
+    async def test_only_cursor_animates_pause_advance_end_pause_wrap(self):
+        app = make_app()
+        async with app.run_test(size=(100, 12)) as pilot:
+            w = text_width(98)  # SubagentTree reserves 2 cells for scrollbar_gutter: stable
+            long_p = "".join(chr(ord("a") + (i % 26)) for i in range(w + 4))
+            long_c = "".join(chr(ord("A") + (i % 26)) for i in range(w + 4))
+            groups = self._with_texts(app, **{fx.PLANNER: long_p, fx.CHECKER: long_c})
+            with mock.patch.object(app.agents, "rows", return_value=groups):
+                tree = await start(pilot, app)
+            self.assertEqual(text_width(tree.scrollable_content_region.width, tree.cols), w)
+            planner = find(tree.root, fx.PLANNER)
+            checker = find(tree.root, fx.CHECKER)
+            self.assertTrue(planner.label.plain.endswith("…"))
+            self.assertTrue(checker.label.plain.endswith("…"))
+
+            for _ in range(MARQUEE_PAUSE_TICKS - 1):
+                app.list_screen.tick_marquee()
+            self.assertTrue(planner.label.plain.endswith("…"))
+
+            for off in range(1, 5):
+                app.list_screen.tick_marquee()
+                self.assertTrue(planner.label.plain.endswith(long_p[off:off + w]))
+                self.assertNotIn("…", planner.label.plain)
+                self.assertTrue(checker.label.plain.endswith("…"))
+
+            for _ in range(MARQUEE_PAUSE_TICKS - 1):
+                app.list_screen.tick_marquee()
+            self.assertTrue(planner.label.plain.endswith(long_p[4:4 + w]))
+
+            app.list_screen.tick_marquee()  # wrap back to 0
+            self.assertTrue(planner.label.plain.endswith("…"))
+
+    async def test_resets_on_cursor_move_and_text_change_and_keeps_across_refresh(self):
+        app = make_app()
+        async with app.run_test(size=(100, 12)) as pilot:
+            w = text_width(100)
+            long_p = "0123456789" + "p" * w
+            long_c = "ABCDEFGHIJ" + "c" * w
+            groups = self._with_texts(app, **{fx.PLANNER: long_p, fx.CHECKER: long_c})
+            with mock.patch.object(app.agents, "rows", return_value=groups):
+                tree = await start(pilot, app)
+                w = text_width(tree.scrollable_content_region.width, tree.cols)
+                planner = find(tree.root, fx.PLANNER)
+                for _ in range(MARQUEE_PAUSE_TICKS + 1):
+                    app.list_screen.tick_marquee()
+                self.assertEqual(tree._marquee_offset, 2)
+                self.assertTrue(planner.label.plain.endswith(long_p[2:2 + w]))
+
+                # Same row, same text on refresh keeps offset
+                app.refresh_data()
+                self.assertEqual(tree._marquee_offset, 2)
+                self.assertTrue(planner.label.plain.endswith(long_p[2:2 + w]))
+
+                # Moving cursor resets old row back to "…" and resets offset
+                await pilot.press("ctrl+n")
+                await pilot.pause()
+                self.assertTrue(planner.label.plain.endswith("…"))
+                self.assertEqual(tree._marquee_offset, 0)
+
+                # Move back, advance again, then change text on refresh -> resets to 0
+                await pilot.press("ctrl+p")
+                await pilot.pause()
+                for _ in range(MARQUEE_PAUSE_TICKS + 1):
+                    app.list_screen.tick_marquee()
+                self.assertEqual(tree._marquee_offset, 2)
+
+            updated = self._with_texts(app, **{fx.PLANNER: "UPDATED000" + "u" * w, fx.CHECKER: long_c})
+            with mock.patch.object(app.agents, "rows", return_value=updated):
+                app.refresh_data()
+            self.assertEqual(tree._marquee_offset, 0)
+            self.assertTrue(planner.label.plain.endswith("…"))
+
+            # Dragging a column border resets marquee offset to 0
+            with mock.patch.object(app.agents, "rows", return_value=updated):
+                for _ in range(MARQUEE_PAUSE_TICKS + 1):
+                    app.list_screen.tick_marquee()
+                self.assertEqual(tree._marquee_offset, 2)
+                await pilot.mouse_down("#colhead", offset=(24, 0))
+                await pilot.hover("#colhead", offset=(28, 0))
+                await pilot.mouse_up("#colhead", offset=(28, 0))
+                await pilot.pause()
+                self.assertEqual(tree._marquee_offset, 0)
+
+    async def test_short_text_does_nothing(self):
+        app = make_app()
+        async with app.run_test(size=SIZE) as pilot:
+            tree = await start(pilot, app)
+            planner = find(tree.root, fx.PLANNER)
+            before = planner.label
+            with mock.patch.object(planner, "set_label", wraps=planner.set_label) as spy:
+                for _ in range(MARQUEE_PAUSE_TICKS + 5):
+                    app.list_screen.tick_marquee()
+                self.assertEqual(spy.call_count, 0)
+                self.assertEqual(planner.label, before)
+
+    async def test_marquee_disabled(self):
+        app = make_app(settings=dict(SETTINGS, marquee=False))
+        async with app.run_test(size=(100, 12)) as pilot:
+            w = text_width(100)
+            long_p = "0123456789" + "x" * w
+            groups = self._with_texts(app, **{fx.PLANNER: long_p})
+            with mock.patch.object(app.agents, "rows", return_value=groups):
+                tree = await start(pilot, app)
+            planner = find(tree.root, fx.PLANNER)
+            for _ in range(MARQUEE_PAUSE_TICKS + 5):
+                app.list_screen.tick_marquee()
+            self.assertEqual(tree._marquee_offset, 0)
+            self.assertTrue(planner.label.plain.endswith("…"))
+
+    async def test_cjk_marquee_in_app(self):
+        app = make_app()
+        async with app.run_test(size=(100, 12)) as pilot:
+            cjk = "가나다라마바사아자차카타파하" * 3
+            groups = self._with_texts(app, **{fx.PLANNER: cjk})
+            with mock.patch.object(app.agents, "rows", return_value=groups):
+                tree = await start(pilot, app)
+            w = text_width(tree.scrollable_content_region.width, tree.cols)
+            span = marquee_span(cjk, w)
+            planner = find(tree.root, fx.PLANNER)
+            for _ in range(MARQUEE_PAUSE_TICKS):
+                app.list_screen.tick_marquee()
+            self.assertEqual(tree._marquee_offset, 1)
+            self.assertTrue(planner.label.plain.endswith(marquee_window(cjk, w, 1)))
+            for _ in range(span - 1):
+                app.list_screen.tick_marquee()
+            self.assertEqual(tree._marquee_offset, span)
+            self.assertTrue(planner.label.plain.endswith(marquee_window(cjk, w, span)))
+
+    async def test_marquee_timer_fires(self):
+        app = make_app()
+        app.agents.set_root(fx.ROOT)
+        w = text_width(100)
+        long_p = "0123456789" + "t" * w
+        groups = self._with_texts(app, **{fx.PLANNER: long_p})
+        with mock.patch.object(app_mod, "MARQUEE_STEP_S", 0.01), \
+                mock.patch.object(app.agents, "rows", return_value=groups):
+            async with app.run_test(size=(100, 12)) as pilot:
+                tree = await start(pilot, app)
+                planner = find(tree.root, fx.PLANNER)
+                self.assertTrue(await wait_until(pilot, lambda: tree._marquee_offset > 0))
+                self.assertNotIn("…", planner.label.plain)
 
 
 @unittest.skipUnless(HAVE_TEXTUAL, "textual not installed")

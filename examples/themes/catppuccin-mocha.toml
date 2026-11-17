@@ -1,0 +1,23 @@
+# Catppuccin Mocha theme for agyscope.
+# Copy to ~/.config/agyscope/themes/catppuccin-mocha.toml and set
+# `theme = "catppuccin-mocha"` in ~/.config/agyscope/config.toml.
+# Note: this uses the same name as Textual's built-in catppuccin-mocha theme
+# and overrides it with these palette and agyscope-* state colors.
+
+name = "catppuccin-mocha"
+dark = true
+primary = "#cba6f7"
+secondary = "#89b4fa"
+accent = "#fab387"
+foreground = "#cdd6f4"
+background = "#1e1e2e"
+surface = "#313244"
+panel = "#181825"
+warning = "#f9e2af"
+error = "#f38ba8"
+success = "#a6e3a1"
+
+[variables]
+agyscope-waiting = "#89b4fa"
+agyscope-msg = "#94e2d5"
+agyscope-cmd = "#94e2d5"

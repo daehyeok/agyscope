@@ -3,8 +3,8 @@
 Each setting is taken from the first of these that sets it:
 
   1. command-line flags
-  2. the JSON config file: $AGYSCOPE_CONFIG, or
-     ${XDG_CONFIG_HOME:-~/.config}/agyscope/config.json
+  2. the TOML config file: $AGYSCOPE_CONFIG, or
+     ${XDG_CONFIG_HOME:-~/.config}/agyscope/config.toml
   3. the default
 
 DEFAULTS are the core settings. Integrations add their own with load(extra=...); the
@@ -15,26 +15,37 @@ config mistake never stops the panel from starting.
 """
 
 import copy
-import json
 import os
+import tomllib
 
 from . import keymap
+
+COLUMNS = {"role": 24, "state": 8, "model": 22, "age": 5}
+COLUMN_LIMITS = {"role": (8, 80), "state": (4, 20), "model": (6, 60), "age": (3, 10)}
 
 DEFAULTS = {
     "app_dir": "~/.gemini/antigravity-cli",
     "keymap": "emacs",
     "keys": {},
     "pager": ["less", "-R", "+G"],
+    "theme": "textual-dark",
+    "marquee": True,
+    "columns": dict(COLUMNS),
 }
 
 INTEGRATION_KEYS = frozenset({"bounds", "auto_open", "interactive", "command"})
+LEGACY_WARNING = "config.json is no longer read; convert it to config.toml"
 
 
 def config_path(env):
     if env.get("AGYSCOPE_CONFIG"):
         return os.path.expanduser(env["AGYSCOPE_CONFIG"])
     base = env.get("XDG_CONFIG_HOME") or os.path.join(os.path.expanduser("~"), ".config")
-    return os.path.join(base, "agyscope", "config.json")
+    return os.path.join(base, "agyscope", "config.toml")
+
+
+def themes_dir(env):
+    return os.path.join(os.path.dirname(config_path(env)), "themes")
 
 
 def check_bool(value):
@@ -77,23 +88,37 @@ def _check(name, value):
         return out
     if name == "pager":
         return check_str_list(value)
+    if name == "theme":
+        if not isinstance(value, str) or not value.strip():
+            raise ValueError("must be a non-empty string")
+        return value
+    if name == "marquee":
+        return check_bool(value)
+    if name == "columns":
+        if not isinstance(value, dict):
+            raise ValueError("must be a table of column -> width")
+        for col, width in value.items():
+            if col not in COLUMNS:
+                raise ValueError("unknown column %r" % (col,))
+            lo, hi = COLUMN_LIMITS[col]
+            if isinstance(width, bool) or not isinstance(width, int) or not (lo <= width <= hi):
+                raise ValueError("%s: must be an integer from %d to %d" % (col, lo, hi))
+        return dict(COLUMNS, **value)
     raise ValueError("unknown setting")
 
 
 def read_file(path, known):
-    """(dict, warnings) from a JSON config file; a missing file is not a warning.
+    """(dict, warnings) from a TOML config file; a missing file is not a warning.
 
     Keys in neither known nor INTEGRATION_KEYS are warned about; only known keys are returned.
     """
     try:
-        with open(path, encoding="utf-8") as f:
-            data = json.load(f)
+        with open(path, "rb") as f:
+            data = tomllib.load(f)
     except FileNotFoundError:
         return {}, []
-    except (OSError, ValueError) as e:
+    except (OSError, tomllib.TOMLDecodeError, UnicodeDecodeError) as e:
         return {}, ["config %s: %s" % (path, e)]
-    if not isinstance(data, dict):
-        return {}, ["config %s: must be a JSON object" % path]
     warnings = ["config %s: unknown setting %r" % (path, k) for k in data
                 if k not in known and k not in INTEGRATION_KEYS]
     return {k: v for k, v in data.items() if k in known}, warnings
@@ -114,7 +139,11 @@ def load(flags=None, env=None, extra=None):
     flags = {k: v for k, v in (flags or {}).items() if v is not None}
     specs = {name: (default, lambda v, n=name: _check(n, v)) for name, default in DEFAULTS.items()}
     specs.update(extra)
-    file_values, warnings = read_file(config_path(env), specs)
+    path = config_path(env)
+    file_values, warnings = read_file(path, specs)
+    if (not env.get("AGYSCOPE_CONFIG") and not os.path.exists(path)
+            and os.path.isfile(os.path.join(os.path.dirname(path), "config.json"))):
+        warnings.append(LEGACY_WARNING)
     settings = {}
     for name, (default, check) in specs.items():
         if name in flags:

@@ -31,6 +31,19 @@ class CliTest(unittest.TestCase):
         self.assertEqual(args.rex_block, "b")
         self.assertEqual(args.keymap, "vim")
 
+    def test_theme_and_marquee_flags(self):
+        flags, warnings = cli.flags_of(cli.parse(["--theme", "nord", "--no-marquee"]))
+        self.assertEqual(warnings, [])
+        self.assertEqual(flags["theme"], "nord")
+        self.assertIs(flags["marquee"], False)
+
+        flags_on, _ = cli.flags_of(cli.parse(["--marquee"]))
+        self.assertIs(flags_on["marquee"], True)
+
+        flags_default, _ = cli.flags_of(cli.parse([]))
+        self.assertIsNone(flags_default["theme"])
+        self.assertIsNone(flags_default["marquee"])
+
     def test_block_flag_removed(self):
         with contextlib.redirect_stderr(io.StringIO()), self.assertRaises(SystemExit):
             cli.parse(["--block", "b"])
