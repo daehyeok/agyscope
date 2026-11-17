@@ -2,14 +2,17 @@
 
 [![test](https://github.com/daehyeok/agyscope/actions/workflows/test.yml/badge.svg)](https://github.com/daehyeok/agyscope/actions/workflows/test.yml)
 
-`agyscope` is an unofficial, read-only viewer for the subagents of an Antigravity agent
-CLI (`agy`) session. It runs in any terminal.
+`agyscope` is an unofficial, read-only viewer for the subagents of Antigravity agent
+CLI (`agy`) sessions. It runs in any terminal.
 
-It shows a full-width subagent list with each subagent's state, model, age, and last
-step. Press `Enter` on any subagent to open a full-screen view of its live steps, where
-you can fold turns and tool calls, scroll line-by-line, or open the full transcript in
-a pager. Press `Esc` or `q` to return to the list. agyscope only reads files. It never
-sends anything to an agent or a terminal.
+It shows every running agent conversation (and any you attach) as a tree: the
+conversation's own row, then its subagents, each with state, model, age, and last step.
+Press `Enter` on any row to open a full-screen view of its live steps, where you can
+fold turns and tool calls, scroll line-by-line, or open the full transcript in a pager.
+Press `Esc` or `q` to return to the list. Agents started by `/run_workflow` scripts,
+which the agent doesn't link to their conversation, can be
+[attached](#attaching-conversations) from the panel or the command line. agyscope only
+reads the agent's files. It never sends anything to an agent or a terminal.
 
 > **Unofficial.** This project is not affiliated with or endorsed by Google. See
 > [Disclaimer](#disclaimer).
@@ -43,14 +46,14 @@ Upgrade, pin a version, or uninstall:
 
 ```sh
 uv tool upgrade agyscope
-uv tool install agyscope==0.2.1
+uv tool install agyscope==0.2.2
 uv tool uninstall agyscope
 ```
 
 (`pipx install agyscope` also works.)
 
 uv puts the commands in its tool bin directory (normally `~/.local/bin`) and installs
-Textual into the tool's own environment, using the host's own index configuration
+Textual and AnyIO into the tool's own environment, using the host's own index configuration
 (`uv.toml`, `UV_INDEX_URL`, ...). Nothing else is installed globally.
 
 ### Development / from source
@@ -70,26 +73,38 @@ uv tool install --editable ~/src/agyscope
 ## Usage
 
 ```sh
-agyscope --pid 1234                     # follow the agent process 1234
-agyscope --conversation <id>            # show one conversation
-agyscope --once --pid 1234              # print the list once as plain text
-agyscope --once --conversation <id>     # same, for a conversation id
-agyscope --view <child-id-prefix> --conversation <id>   # one subagent, fully unfolded
+agyscope                                # every running agent on this host
+agyscope --pid 1234                     # the agent process 1234 first, then the others
+agyscope --conversation <id> --no-live  # just one conversation
+agyscope --once                         # print the list once as plain text
+agyscope --view <id-prefix>             # one conversation or subagent, fully unfolded
+agyscope attach <id> [--under <main>]   # attach a conversation (see below)
 ```
 
-Which conversation is shown:
+Which conversations are shown, in this order (each conversation is listed once, in the
+first place it is found):
 
-1. `--pid PID`: the agent keeps `<data dir>/presence/<conversation>.lock` open, and the
-   open files come from `lsof`, or from `/proc/<pid>/fd` when `lsof` is missing. The
-   directory holding `presence/` is the data directory, so no setting is needed.
-   agyscope re-checks the pid every 3 seconds, so resuming another conversation in the
-   same process switches the view. A dead pid keeps the last answer.
-2. With the [Rex integration](#rex-integration), the conversation the hook last recorded
-   for the pane (`--rex-block`).
-3. `--conversation ID`.
+1. **The pane's conversation.** `--pid PID`: the agent keeps
+   `<data dir>/presence/<conversation>.lock` open, and the open files come from `lsof`,
+   or from `/proc/<pid>/fd` when `lsof` is missing. The directory holding `presence/` is
+   the data directory, so no setting is needed. agyscope re-checks every 2 seconds, so
+   resuming another conversation in the same process switches it (the other
+   conversations stay). A dead pid keeps the last answer. Without `--pid`: the
+   conversation the [Rex hook](#rex-integration) last recorded for the pane
+   (`--rex-block`), else the first `--conversation`.
+2. The other `--conversation ID`s.
+3. Conversations [attached at the top level](#attaching-conversations).
+4. With `live` on (the default): every conversation whose presence lock some process
+   holds open, in the configured data directory and every data directory found above,
+   newest first. A conversation whose agent exited stays listed for 10 minutes.
 
-From the root conversation it follows every `invoke_subagent` result to the child
-transcripts, recursively.
+From each root conversation it follows every `invoke_subagent` result to the child
+transcripts, recursively, and adds the children recorded in the agent's database,
+attached by links, or named in its workflow task logs.
+
+The slow work (`lsof`, the `/proc` scan, the link store, the poke socket) runs in the
+background with AnyIO, so the panel never waits for it; a hung `lsof` is killed after
+2 seconds.
 
 `--once` and `--view` print text and exit; they don't start the Textual UI. The exit
 code is 0 on success, 1 when no conversation was found (or after `ctrl+c`), and 2 when
@@ -97,7 +112,8 @@ agyscope crashed. After a crash on a terminal it waits for `Enter`, so the trace
 stays readable.
 
 Settings flags: `--app-dir DIR`, `--keymap emacs|vim`, `--keys-json JSON`,
-`--pager-json JSON`, `--theme NAME`, `--marquee` / `--no-marquee`
+`--pager-json JSON`, `--theme NAME`, `--marquee` / `--no-marquee`, `--live` / `--no-live`,
+`--main-rows` / `--no-main-rows`
 (see [Configuration](#configuration)). `agyscope --help` lists them all.
 
 ## Configuration
@@ -105,7 +121,7 @@ Settings flags: `--app-dir DIR`, `--keymap emacs|vim`, `--keys-json JSON`,
 For each setting, the first source that sets it wins:
 
 1. command-line flags (`--app-dir`, `--keymap`, `--keys-json`, `--pager-json`, `--theme`,
-   `--marquee` / `--no-marquee`);
+   `--marquee` / `--no-marquee`, `--live` / `--no-live`, `--main-rows` / `--no-main-rows`);
 2. the config file `${XDG_CONFIG_HOME:-~/.config}/agyscope/config.toml` (normally
    `~/.config/agyscope/config.toml`), or the file named by `AGYSCOPE_CONFIG`;
 3. the defaults.
@@ -122,6 +138,8 @@ For each setting, the first source that sets it wins:
 | `pager` | `["less", "-R", "+G"]` | Pager argv for the pager action. The file path replaces a `{file}` argument, or is appended. |
 | `theme` | `"textual-dark"` | Theme name (Textual built-in or a file in `~/.config/agyscope/themes/`). |
 | `marquee` | `true` | Horizontally scroll the highlighted row's **Last step** cell when it overflows. |
+| `live` | `true` | Also list every running agent on the host (held presence locks), not only the pane's conversation and attachments. |
+| `main_rows` | `true` | Start with each conversation's own row shown (key `m` toggles). |
 | `columns` | `{role = 24, state = 8, model = 22, age = 5}` | Initial list column widths in cells (`role` 8–80, `state` 4–20, `model` 6–60, `age` 3–10). |
 
 The data directory is usually found without `app_dir`: from the presence lock the agent
@@ -201,6 +219,10 @@ clicking an item's header toggles its fold.
 | `pager` (open full transcript in pager) | | `M-o`, `o` | `o` |
 | `back` (view: return to list; list: collapse/parent) | Left, Esc | `C-g` | `Esc` |
 | `close` (list: exit; view: return to list) | | `q` | `q` |
+| `toggle_main` (list: hide/show conversation rows) | | `m` | `m` |
+| `attach` (list: pick a conversation to watch) | | `a` | `i` |
+| `attach_under` (list: pick one to attach under the highlighted conversation) | | `A` | `I` |
+| `detach` (list: hide the highlighted row) | | `d` | `x` |
 
 Note: Textual reports `Esc` followed by `<` or `>` as plain `<` and `>`, so `M-<` and
 `M->` are bound to `<` and `>` as well (either key works). In the view screen, `q`
@@ -213,9 +235,13 @@ Meta/Alt, and `Up Down Left Right PgUp PgDn Home End Enter Esc Tab Space`.
 
 ## Two screens: Subagent list and step view
 
-**List screen.** Subagents are shown newest first, with nested subagents indented. A
-whole tree is under **Working** while any member is `working`, `waiting` or `quiet`, and
-under **Completed** otherwise. These are the states:
+**List screen.** Each conversation is a tree: its own row (the conversation's title, or
+`main`) on top, then its subagents, newest first, nested ones indented. A whole tree is
+under **Working** while any member is `working`, `waiting` or `quiet`, and under
+**Completed** otherwise; the pane's conversation comes first. Rows attached by a link or
+found in a workflow task log are marked `~`. Press `m` to hide the conversation rows:
+the subagents are then listed exactly as a single conversation's were before 0.2.2.
+These are the states:
 
 | State | Meaning |
 |---|---|
@@ -274,6 +300,49 @@ cursor and folds while a view is open, and each subagent remembers its own scrol
 position, folds, and follow state across reopens (opening a subagent for the first time
 starts in follow mode). If the subagent being viewed disappears (for example, when the
 conversation switches), agyscope returns to the list automatically.
+
+## Attaching conversations
+
+Agents that `/run_workflow` scripts start are separate conversations the agent doesn't
+link to the conversation that ran the workflow. Attach them, or any other conversation,
+and every panel lists them; detach hides a row, even a subagent found in a transcript.
+
+```sh
+agyscope attach b029292c                 # from an agent's shell: under that agent's conversation
+agyscope attach b029292c --under 36d6    # under a given conversation (ids may be prefixes)
+agyscope attach 02b9bc91 --top           # on the top-level watch list
+agyscope detach b029292c --under 36d6    # hide it there (attach again to undo)
+agyscope links                           # what is attached and hidden
+```
+
+The parent is the first of:
+
+| Source | Example |
+|---|---|
+| `--under MAIN` | `--under 36d6bc77` |
+| `--top` | the top-level watch list |
+| `$AGYSCOPE_MAIN` | set by a wrapper script for every agent it starts |
+| `$ANTIGRAVITY_CONVERSATION_ID` | set by the agent for every command it runs, so `agyscope attach <id>` from an agent attaches under that agent |
+| otherwise | the top level |
+
+The data directory is `--app-dir`, else `$ANTIGRAVITY_APP_DATA_DIR`, else `app_dir`. The
+command prints the full ids, the parent and where it came from, and how many running
+panels show the parent. It exits 2 for a bad, unknown or ambiguous id, or a cycle.
+
+In the panel, `a` (vim `i`) opens a fuzzy picker of conversations (running ones first,
+then recent ones, including workflow agents by type) and attaches the choice at the top
+level; `A` (vim `I`) attaches it under the highlighted conversation; `d` (vim `x`)
+detaches the highlighted row. The pane's own conversation can't be detached.
+
+Even without attaching, workflow agents appear under their conversation once they
+finish: agyscope reads `[agent:<type>] ... (<id>)` lines from the conversation's
+`.system_generated/tasks/*.log`.
+
+Attachments are files under `${XDG_STATE_HOME:-~/.local/state}/agyscope/` (`links/` and
+`hidden/`, one file per entry), so they survive restarts and work with no panel running.
+Each panel listens on `run/<pid>.sock` there; after a change, `attach`/`detach` tell the
+panels to re-read at once (otherwise they notice within 2 seconds). That directory is the
+only place agyscope writes.
 
 ## Rex integration
 

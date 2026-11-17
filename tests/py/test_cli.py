@@ -10,7 +10,7 @@ from unittest import mock
 
 import helpers  # noqa: F401
 import make_fixtures as fx
-from agyscope import cli, discovery, resolve, textview
+from agyscope import cli, discovery, resolve, sources, textview  # noqa: F401
 
 
 class CliTest(unittest.TestCase):
@@ -44,6 +44,14 @@ class CliTest(unittest.TestCase):
         self.assertIsNone(flags_default["theme"])
         self.assertIsNone(flags_default["marquee"])
 
+    def test_live_and_main_rows_flags(self):
+        flags, _ = cli.flags_of(cli.parse(["--no-live", "--main-rows"]))
+        self.assertIs(flags["live"], False)
+        self.assertIs(flags["main_rows"], True)
+        flags, _ = cli.flags_of(cli.parse([]))
+        self.assertIsNone(flags["live"])
+        self.assertIsNone(flags["main_rows"])
+
     def test_block_flag_removed(self):
         with contextlib.redirect_stderr(io.StringIO()), self.assertRaises(SystemExit):
             cli.parse(["--block", "b"])
@@ -53,21 +61,24 @@ class CliTest(unittest.TestCase):
         _, warnings = cli.flags_of(args)
         self.assertTrue(any("keys-json" in w for w in warnings))
 
-    def test_setup_builds_resolver_and_tree(self):
-        s = cli.setup(["--app-dir", self.tmp, "--conversation", fx.ROOT], env=self.env)
+    def test_setup_builds_collector_and_forest(self):
+        s = cli.setup(["--app-dir", self.tmp, "--conversation", fx.ROOT, "--conversation", "x2"], env=self.env)
         self.assertIsInstance(s, cli.Setup)
-        self.assertEqual(s.args.conversation, fx.ROOT)
+        self.assertEqual(s.args.conversation, [fx.ROOT, "x2"])
         self.assertEqual(s.settings["app_dir"], self.tmp)
         self.assertEqual(s.warnings, [])
-        self.assertIsInstance(s.resolver, resolve.Resolver)
-        self.assertIsInstance(s.tree, discovery.Tree)
-        self.assertEqual(s.tree.app_dir, self.tmp)
+        self.assertIsInstance(s.collector, sources.Collector)
+        self.assertIsInstance(s.forest, discovery.Forest)
+        self.assertEqual(s.forest.app_dir, self.tmp)
+        self.assertEqual(s.collector.links.root, os.path.join(self.tmp, "state", "agyscope"))
+        self.assertIs(s.forest.links, s.collector.links)
+        self.assertEqual([(r.conv, r.source) for r in s.collector.initial()], [(fx.ROOT, "pane"), ("x2", "pinned")])
 
     def test_setup_rex_block_uses_pointer_fallback(self):
         from agyscope.integrations.rex import pointer
         pointer.write_pointer("b", "conv-p", self.env)
         s = cli.setup(["--app-dir", self.tmp, "--rex-block", "b"], self.env)
-        self.assertEqual(s.resolver.resolve(), "conv-p")
+        self.assertEqual([r.conv for r in s.collector.initial()], ["conv-p"])
 
     def test_setup_rex_block_sets_on_close(self):
         s = cli.setup(["--app-dir", self.tmp, "--rex-block", "b"], self.env)
@@ -99,8 +110,15 @@ class CliTest(unittest.TestCase):
         self.assertEqual(code, 0)
         output = out.getvalue()
         self.assertIn("Working", output)
-        self.assertIn("  Planner", output)
-        self.assertIn("Completed", output)
+        self.assertIn("\n  main ", output)  # the main row
+        self.assertIn("    Planner", output)
+        s = cli.setup(["--app-dir", self.tmp, "--conversation", fx.ROOT, "--once", "--no-main-rows"], env=self.env)
+        out = io.StringIO()
+        with contextlib.redirect_stdout(out):
+            cli.run_text(s)
+        self.assertIn("  Planner", out.getvalue())
+        self.assertIn("Completed", out.getvalue())
+        self.assertNotIn(" main ", out.getvalue())
 
     def test_run_text_view_prefix(self):
         s = cli.setup(["--app-dir", self.tmp, "--conversation", fx.ROOT, "--view", "chk"], env=self.env)
@@ -108,9 +126,9 @@ class CliTest(unittest.TestCase):
         with contextlib.redirect_stdout(out):
             code = cli.run_text(s)
         self.assertEqual(code, 0)
-        s.tree.set_root(fx.ROOT, self.tmp)
-        row = next(r for r in discovery.flat(s.tree.rows()) if r["id"].startswith("chk"))
-        expected = "\n".join(textview.plain(s.tree, row)) + "\n"
+        tree = discovery.Tree(self.tmp, fx.ROOT)
+        row = next(r for r in discovery.flat(tree.rows()) if r["id"].startswith("chk"))
+        expected = "\n".join(textview.plain(tree, row)) + "\n"
         self.assertEqual(out.getvalue(), expected)
 
         s_bad = cli.setup(["--app-dir", self.tmp, "--conversation", fx.ROOT, "--view", "bad_prefix"],
@@ -120,7 +138,7 @@ class CliTest(unittest.TestCase):
             code_bad = cli.run_text(s_bad)
         self.assertEqual(code_bad, 1)
         err_output = err.getvalue()
-        self.assertIn("no subagent bad_prefix under root-0000", err_output)
+        self.assertIn("no conversation or subagent bad_prefix", err_output)
 
     def test_run_text_warnings_to_stderr(self):
         s = cli.setup(["--app-dir", self.tmp, "--conversation", fx.ROOT, "--once",

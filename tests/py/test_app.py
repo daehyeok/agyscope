@@ -11,6 +11,8 @@ from unittest import mock
 
 import make_fixtures as fx
 from agyscope import discovery, textview
+from agyscope.links import LinkStore
+from agyscope.sources import Root
 
 try:
     import textual  # noqa: F401
@@ -27,16 +29,28 @@ if HAVE_TEXTUAL:
 
 SIZE = (120, 30)
 NOW = time.time()
-SETTINGS = {"keymap": "emacs", "keys": {}, "pager": ["less"]}
+SETTINGS = {"keymap": "emacs", "keys": {}, "pager": ["less"], "main_rows": False}
 
 
-class FakeResolver:
+class FakeSources:
+    """Stands in for sources.Collector: `root` is the pane's conversation, `extra` more roots."""
+
     def __init__(self, root, app_dir):
         self.root = root
         self.app_dir = app_dir
+        self.extra = []
+        self.pokes = 0
 
-    def current(self):
-        return self.root
+    @property
+    def roots(self):
+        out = [Root(self.root, self.app_dir, "pane", True)] if self.root else []
+        return tuple(out + list(self.extra))
+
+    def initial(self):
+        return self.roots
+
+    def poke(self):
+        self.pokes += 1
 
 
 def shape(node):
@@ -60,9 +74,9 @@ def make_app(root=fx.ROOT, settings=SETTINGS, warnings=(), fixture=True, themes_
     app_dir = tempfile.mkdtemp()
     if fixture:
         fx.build_tree(app_dir)
-    resolver = FakeResolver(root, app_dir)
-    return AgyscopeApp(discovery.Tree(app_dir), resolver, settings, warnings=warnings,
-                       clock=lambda: NOW, themes_dir=themes_dir)
+    store = LinkStore(os.path.join(tempfile.mkdtemp(), "agyscope"))
+    return AgyscopeApp(discovery.Forest(app_dir, links=store), FakeSources(root, app_dir), settings,
+                       warnings=warnings, clock=lambda: NOW, themes_dir=themes_dir)
 
 
 def text_of(static):
@@ -122,28 +136,24 @@ class ListScreenTest(unittest.IsolatedAsyncioTestCase):
                 self.assertIn(title, head)
             self.assertEqual(head, header_columns(tree.scrollable_content_region.width).plain)  # lines up with rows
 
-    async def test_root_switch_resets(self):
+    async def test_root_switch_replaces_pane_tree(self):
         app = make_app()
         async with app.run_test(size=SIZE) as pilot:
             tree = await start(pilot, app)
-            tree.action("back")  # collapse Planner
             tree.action("last")  # Reviewer
             await pilot.pause()
             self.assertEqual(tree.selected_id(), fx.REVIEWER)
-            app.resolver.root = "other-root"
+            app.sources.root = "other-root"
             app.refresh_data()
             await pilot.pause()
             self.assertEqual(app.agents.root, "other-root")
-            self.assertEqual(app.views, {})
             self.assertIsNone(find(tree.root, fx.PLANNER))
             self.assertEqual(shape(tree.root), [])
             self.assertEqual(text_of(app.query_one("#empty")), " " + StepView.NO_SUBAGENTS)
-            app.resolver.root = fx.ROOT
+            app.sources.root = fx.ROOT
             app.refresh_data()
             await pilot.pause()
             self.assertEqual(shape(tree.root), FIXTURE_SHAPE)
-            self.assertTrue(find(tree.root, fx.PLANNER).is_expanded)  # old fold state forgotten
-            self.assertEqual(tree.selected_id(), fx.PLANNER)
             self.assertFalse(app.query_one("#empty").display)
 
     async def test_empty_states(self):
@@ -323,7 +333,8 @@ class MarqueeAppTest(unittest.IsolatedAsyncioTestCase):
             self.addCleanup(patcher.stop)
 
     def _with_texts(self, app, **by_id):
-        orig = app.agents.rows(now=NOW)
+        app.agents.update(app.sources.roots)
+        orig = app.agents.rows(now=NOW, show_main=False)
         return [(name, [dict(r, text=by_id[r["id"]]) if r["id"] in by_id else r for r in grp])
                 for name, grp in orig]
 
@@ -457,7 +468,6 @@ class MarqueeAppTest(unittest.IsolatedAsyncioTestCase):
 
     async def test_marquee_timer_fires(self):
         app = make_app()
-        app.agents.set_root(fx.ROOT)
         w = text_width(100)
         long_p = "0123456789" + "t" * w
         groups = self._with_texts(app, **{fx.PLANNER: long_p})
@@ -567,8 +577,9 @@ class ViewScreenTest(unittest.IsolatedAsyncioTestCase):
             await open_view(pilot, app, downs=1)  # Checker
             rows = app.agents.rows
 
-            def without_checker(now):
-                return [(name, [r for r in group if r["id"] != fx.CHECKER]) for name, group in rows(now=now)]
+            def without_checker(now, show_main=True):
+                return [(name, [r for r in group if r["id"] != fx.CHECKER])
+                        for name, group in rows(now=now, show_main=show_main)]
 
             with mock.patch.object(app.agents, "rows", side_effect=without_checker):
                 app.refresh_data()
@@ -577,11 +588,10 @@ class ViewScreenTest(unittest.IsolatedAsyncioTestCase):
             self.assertIsNone(find(tree.root, fx.CHECKER))
             self.assertIs(app.focused, tree)
             await open_view(pilot, app)
-            app.resolver.root = "other-root"  # the pane's conversation switched
+            app.sources.root = "other-root"  # the pane's conversation switched
             app.refresh_data()
             await pilot.pause()
             self.assertIsInstance(app.screen, ListScreen)
-            self.assertEqual(app.views, {})
             app.refresh_data()
             await pilot.pause()
             self.assertIsNone(app.return_value)

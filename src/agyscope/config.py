@@ -30,6 +30,8 @@ DEFAULTS = {
     "pager": ["less", "-R", "+G"],
     "theme": "textual-dark",
     "marquee": True,
+    "live": True,
+    "main_rows": True,
     "columns": dict(COLUMNS),
 }
 
@@ -92,7 +94,7 @@ def _check(name, value):
         if not isinstance(value, str) or not value.strip():
             raise ValueError("must be a non-empty string")
         return value
-    if name == "marquee":
+    if name in ("marquee", "live", "main_rows"):
         return check_bool(value)
     if name == "columns":
         if not isinstance(value, dict):

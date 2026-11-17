@@ -462,6 +462,11 @@ class ColumnsTreeTest(unittest.IsolatedAsyncioTestCase):
 
 @unittest.skipUnless(HAVE_TEXTUAL, "textual not installed")
 class ColumnsTest(unittest.TestCase):
+    def test_linked_row_marked(self):
+        plain = row_columns(dict(ROLE_ROW, linked=True), 18, 120).plain
+        self.assertTrue(plain.startswith("~ Planner"))
+        self.assertTrue(row_columns(ROLE_ROW, 18, 120).plain.startswith("Planner"))
+
     def test_narrow_drops_columns(self):
         every = ("role", "state", "model", "age", "text")
         fixed = DEFAULT_COLS["role"] + 1 + DEFAULT_COLS["state"] + 1 + DEFAULT_COLS["age"]

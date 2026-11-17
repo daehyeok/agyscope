@@ -8,6 +8,7 @@ zero redundant SQLite reads while uncheckpointed WAL writes invalidate immediate
 """
 
 import contextlib
+import datetime
 import os
 import re
 import sqlite3
@@ -115,6 +116,19 @@ def _is_busy(err):
     return "locked" in msg or "busy" in msg
 
 
+def _parse_dt(value):
+    """Epoch seconds for a summaries datetime ('2026-11-17 21:29:26.77+00:00'), or None."""
+    if not isinstance(value, str) or not value:
+        return None
+    try:
+        dt = datetime.datetime.fromisoformat(value.strip().replace(" ", "T", 1))
+    except ValueError:
+        return None
+    if dt.tzinfo is None:
+        dt = dt.replace(tzinfo=datetime.timezone.utc)
+    return dt.timestamp()
+
+
 def _decode_gen_metadata(blob):
     top = pb_fields(blob)
     f1 = pb_fields(top[1][-1]) if top.get(1) else {}
@@ -132,6 +146,57 @@ class AgentDB:
         self._models = {}           # conv_id -> (sig, resolved_or_none)
         self._summaries_sig = None
         self._children = {}         # parent_id -> [child_dict, ...]
+        self._meta_sig = None
+        self._meta = {}             # conv_id -> {id, title, agent, modified, parent}
+
+    def _load_meta(self):
+        """{conv_id: {...}} of every summary row (title, agent name, last modified, parent)."""
+        if not self.app_dir:
+            return {}
+        path = os.path.join(self.app_dir, "conversation_summaries.db")
+        sig = _stat_sig(path)
+        if sig[0] is None:
+            self._meta_sig, self._meta = None, {}
+            return {}
+        if sig == self._meta_sig:
+            return self._meta
+        try:
+            with _ro_connect(path) as con:
+                rows = con.execute(
+                    "SELECT conversation_id, title, agent_name, last_modified_time, parent_conversation_id "
+                    "FROM conversation_summaries").fetchall()
+        except sqlite3.Error as err:
+            if not _is_busy(err):
+                self._meta_sig, self._meta = sig, {}
+            return self._meta
+        except OSError:
+            return self._meta
+        meta = {}
+        for cid, title, agent, modified, parent in rows:
+            if not cid or not isinstance(cid, str):
+                continue
+            meta[cid] = {"id": cid, "title": (title or "").strip() if isinstance(title, str) else "",
+                         "agent": (agent or "").strip() if isinstance(agent, str) else "",
+                         "modified": _parse_dt(modified), "parent": parent or ""}
+        self._meta_sig, self._meta = sig, meta
+        return meta
+
+    def title_of(self, conv_id):
+        """The conversation's title, else its agent name, else None."""
+        m = self._load_meta().get(conv_id)
+        if not m:
+            return None
+        return m["title"] or m["agent"] or None
+
+    def parent_of(self, conv_id):
+        m = self._load_meta().get(conv_id)
+        return (m or {}).get("parent") or None
+
+    def recent_roots(self, limit=200):
+        """Root conversations (no parent), most recently modified first: [{id, title, agent, modified}]."""
+        roots = [m for m in self._load_meta().values() if not m["parent"]]
+        roots.sort(key=lambda m: m["modified"] or 0, reverse=True)
+        return [dict(m) for m in roots[:limit]]
 
     def model_of(self, conv_id, fallback=None):
         fb = fallback.strip() if isinstance(fallback, str) and fallback.strip() else "-"

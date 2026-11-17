@@ -14,6 +14,13 @@ class KeymapTest(unittest.TestCase):
         self.assertEqual(km["Enter"], "open")
         self.assertNotIn("j", km)
 
+    def test_conversation_keys(self):
+        em, vi = keymap.build("emacs"), keymap.build("vim")
+        self.assertEqual([em[k] for k in ("m", "a", "A", "d")], ["toggle_main", "attach", "attach_under", "detach"])
+        self.assertEqual([vi[k] for k in ("m", "i", "I", "x")], ["toggle_main", "attach", "attach_under", "detach"])
+        self.assertEqual(vi["a"], "fold_all")  # vim keeps a for fold all
+        self.assertEqual(set(keymap.CONVERSATION_ACTIONS) - set(keymap.ACTIONS), set())
+
     def test_pane_actions_removed(self):
         for action in ("focus_next", "toggle_sidebar"):
             self.assertNotIn(action, keymap.ACTIONS)

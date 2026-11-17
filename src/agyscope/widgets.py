@@ -239,7 +239,8 @@ def row_columns(row: dict, label_width: int, total_width: int, state_styles=None
     c = DEFAULT_COLS if cols is None else cols
     styles = FALLBACK_STYLES if state_styles is None else state_styles
     model = row.get("model")
-    cells = {"role": (row["role"], None), "state": (row["state"], styles.get(row["state"])),
+    role = ("~ " + row["role"]) if row.get("linked") else row["role"]
+    cells = {"role": (role, None), "state": (row["state"], styles.get(row["state"])),
              "model": (model if model and model != "-" else "", None),
              "age": (_short_age(row.get("age") or "", c["age"]), None), "text": (row.get("text") or "", None)}
     return _columns(cells, label_width, total_width, c, text_offset=text_offset)
