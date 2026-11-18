@@ -23,6 +23,8 @@ _COLORS = {
     "waiting": "blue",
     "msg": "cyan",
     "cmd": "cyan",
+    # Not a state: the role color of workflow/swarm agent rows (agent name, no parent).
+    "workflow": "bright_blue",
 }
 _BOLD = ("cmd", "msg", "running", "step", "warn")
 FALLBACK_STYLES = {
@@ -42,6 +44,7 @@ STATE_VARS = {
     "cmd": "accent",
     "quiet": "text-muted",
     "dim": "text-muted",
+    "workflow": "secondary",  # role style, the one theme color no state uses
 }
 
 _COLOR_FIELDS = frozenset({

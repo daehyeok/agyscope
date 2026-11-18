@@ -252,6 +252,7 @@ class Transcript:
         self.nsteps = 0
         self.children = []                   # [{id, role, type, model, parent, ts, transcript}]
         self.child_ids = set()
+        self.started = None                  # epoch seconds of the first step that has created_at
 
     def _cancel_pending(self):
         while self.pending:
@@ -300,6 +301,8 @@ class Transcript:
         error = status == "ERROR" and kind != "GENERIC"  # GENERIC ERROR = a failed tool call
         first = self.nsteps == 0
         self.nsteps += 1
+        if self.started is None and step.get("created_at"):
+            self.started = parse_time(step.get("created_at"))
 
         if kind == "PLANNER_RESPONSE":
             self._cancel_pending()
@@ -424,7 +427,7 @@ def turn_title(ev, names, parent):
     if ev.get("error"):
         return "Error"
     if ev["first"]:
-        return "Message from parent"
+        return "Message from parent" if parent is not None else "Message from user"
     if ev["user"]:
         return "Message from user"
     if ev["task"] is not None:

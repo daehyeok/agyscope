@@ -7,9 +7,10 @@ Key names:
   named keys               Up Down Left Right PgUp PgDn Home End Enter Esc Tab Space
 
 Actions:
-  up down page_up page_down first last open fold_all pager back close
+  up down page_up page_down first last open fold_all pager back close help
+  toggle_main attach attach_under detach   (list screen only)
 
-Keys in ALWAYS work in every preset. A preset adds its own keys, and user keys
+Keys in ALWAYS work in every preset (``?`` opens the key help). A preset adds its own keys, and user keys
 (``keys`` setting: action -> key or list of keys) are added last, so a user key
 that a preset also uses moves to the user's action.
 
@@ -21,7 +22,21 @@ UNREACHABLE; unreachable() lists the ones a keymap uses so the panel can warn.
 import string
 
 ACTIONS = ("up", "down", "page_up", "page_down", "first", "last",
-           "open", "fold_all", "pager", "back", "close")
+           "open", "fold_all", "pager", "back", "close", "help",
+           "toggle_main", "attach", "attach_under", "detach")
+CONVERSATION_ACTIONS = ("toggle_main", "attach", "attach_under", "detach")  # list screen only
+
+# Action -> what it does, for the key help dialog.
+DESCRIPTIONS = {
+    "up": "move up", "down": "move down", "page_up": "page up", "page_down": "page down",
+    "first": "first row / step", "last": "last row; view: newest step and follow",
+    "open": "list: view row or fold group; view: fold/unfold step",
+    "fold_all": "fold or unfold everything", "pager": "open the transcript in the pager",
+    "back": "list: collapse or go to parent; view: back to the list",
+    "close": "list: exit; view: back to the list", "help": "show this key help",
+    "toggle_main": "hide/show conversation rows", "attach": "attach a conversation",
+    "attach_under": "attach under the highlighted conversation", "detach": "detach the highlighted row",
+}
 
 NAMED = ("Up", "Down", "Left", "Right", "PgUp", "PgDn", "Home", "End",
          "Enter", "Esc", "Tab", "Space")
@@ -29,6 +44,7 @@ NAMED = ("Up", "Down", "Left", "Right", "PgUp", "PgDn", "Home", "End",
 ALWAYS = {
     "up": ["Up"], "down": ["Down"], "page_up": ["PgUp"], "page_down": ["PgDn"],
     "first": ["Home"], "last": ["End"], "open": ["Enter", "Right"], "back": ["Left", "Esc"],
+    "help": ["?"],
 }
 
 PRESETS = {
@@ -36,11 +52,13 @@ PRESETS = {
         "up": ["C-p"], "down": ["C-n"], "page_up": ["M-v"], "page_down": ["C-v"],
         "first": ["M-<"], "last": ["M->"], "open": ["Tab"], "fold_all": ["M-a"],
         "pager": ["M-o", "o"], "back": ["C-g"], "close": ["q"],
+        "toggle_main": ["m"], "attach": ["a"], "attach_under": ["A"], "detach": ["d"],
     },
     "vim": {
         "up": ["k"], "down": ["j"], "page_up": ["C-u", "C-b"], "page_down": ["C-d", "C-f"],
         "first": ["g"], "last": ["G"], "open": ["Space"], "fold_all": ["a"],
         "pager": ["o"], "back": ["Esc"], "close": ["q"],
+        "toggle_main": ["m"], "attach": ["i"], "attach_under": ["I"], "detach": ["x"],
     },
 }
 
@@ -119,6 +137,11 @@ def from_textual(key, character=None):
     if "+" not in key and character is not None and len(character) == 1 and character.isprintable():
         return character
     return None
+
+
+def where(action):
+    """Screen an action works on: "list" for CONVERSATION_ACTIONS, else "both"."""
+    return "list" if action in CONVERSATION_ACTIONS else "both"
 
 
 def keys_for(keymap, action):

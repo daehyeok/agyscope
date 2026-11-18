@@ -11,6 +11,8 @@ from unittest import mock
 
 import make_fixtures as fx
 from agyscope import discovery, textview
+from agyscope.links import LinkStore
+from agyscope.sources import Root
 
 try:
     import textual  # noqa: F401
@@ -27,16 +29,28 @@ if HAVE_TEXTUAL:
 
 SIZE = (120, 30)
 NOW = time.time()
-SETTINGS = {"keymap": "emacs", "keys": {}, "pager": ["less"]}
+SETTINGS = {"keymap": "emacs", "keys": {}, "pager": ["less"], "main_rows": False}
 
 
-class FakeResolver:
+class FakeSources:
+    """Stands in for sources.Collector: `root` is the pane's conversation, `extra` more roots."""
+
     def __init__(self, root, app_dir):
         self.root = root
         self.app_dir = app_dir
+        self.extra = []
+        self.pokes = 0
 
-    def current(self):
-        return self.root
+    @property
+    def roots(self):
+        out = [Root(self.root, self.app_dir, "pane", True)] if self.root else []
+        return tuple(out + list(self.extra))
+
+    def initial(self):
+        return self.roots
+
+    def poke(self):
+        self.pokes += 1
 
 
 def shape(node):
@@ -60,9 +74,9 @@ def make_app(root=fx.ROOT, settings=SETTINGS, warnings=(), fixture=True, themes_
     app_dir = tempfile.mkdtemp()
     if fixture:
         fx.build_tree(app_dir)
-    resolver = FakeResolver(root, app_dir)
-    return AgyscopeApp(discovery.Tree(app_dir), resolver, settings, warnings=warnings,
-                       clock=lambda: NOW, themes_dir=themes_dir)
+    store = LinkStore(os.path.join(tempfile.mkdtemp(), "agyscope"))
+    return AgyscopeApp(discovery.Forest(app_dir, links=store), FakeSources(root, app_dir), settings,
+                       warnings=warnings, clock=lambda: NOW, themes_dir=themes_dir)
 
 
 def text_of(static):
@@ -111,39 +125,31 @@ class ListScreenTest(unittest.IsolatedAsyncioTestCase):
             self.assertFalse(app.query_one("#status").display)
             self.assertFalse(app.query_one("#empty").display)
             self.assertEqual(len(app.query("#steps")), 0)  # no step pane on the list
-            hint = text_of(app.query_one("#listhint"))
-            for part in ("Subagents", "C-n/C-p move", "Enter view", "q close"):
-                self.assertIn(part, hint)
-            for gone in ("focus", "sidebar"):
-                self.assertNotIn(gone, hint)
+            self.assertEqual(len(app.query("#listhint")), 0)  # keys live in the ? help dialog now
             head = text_of(app.query_one("#colhead"))
             self.assertTrue(head.startswith("Subagent "))
             for title in ("State", "Model", "Age", "Last step"):
                 self.assertIn(title, head)
             self.assertEqual(head, header_columns(tree.scrollable_content_region.width).plain)  # lines up with rows
 
-    async def test_root_switch_resets(self):
+    async def test_root_switch_replaces_pane_tree(self):
         app = make_app()
         async with app.run_test(size=SIZE) as pilot:
             tree = await start(pilot, app)
-            tree.action("back")  # collapse Planner
             tree.action("last")  # Reviewer
             await pilot.pause()
             self.assertEqual(tree.selected_id(), fx.REVIEWER)
-            app.resolver.root = "other-root"
+            app.sources.root = "other-root"
             app.refresh_data()
             await pilot.pause()
             self.assertEqual(app.agents.root, "other-root")
-            self.assertEqual(app.views, {})
             self.assertIsNone(find(tree.root, fx.PLANNER))
             self.assertEqual(shape(tree.root), [])
             self.assertEqual(text_of(app.query_one("#empty")), " " + StepView.NO_SUBAGENTS)
-            app.resolver.root = fx.ROOT
+            app.sources.root = fx.ROOT
             app.refresh_data()
             await pilot.pause()
             self.assertEqual(shape(tree.root), FIXTURE_SHAPE)
-            self.assertTrue(find(tree.root, fx.PLANNER).is_expanded)  # old fold state forgotten
-            self.assertEqual(tree.selected_id(), fx.PLANNER)
             self.assertFalse(app.query_one("#empty").display)
 
     async def test_empty_states(self):
@@ -254,6 +260,9 @@ class ThemeTest(unittest.IsolatedAsyncioTestCase):
             self.assertEqual(app.theme, "nord")
             # nord success is #A3BE8C
             self.assertEqual(app.state_styles["done"].color, rich.color.Color.parse("#A3BE8C"))
+            tree = app.list_screen.query_one("#tree")
+            self.assertEqual(tree.state_styles["done"], app.state_styles["done"])  # not the fallback
+            self.assertEqual(tree.state_styles["workflow"], app.state_styles["workflow"])
 
     async def test_unknown_theme_warns(self):
         app = make_app(settings=dict(SETTINGS, theme="nope"))
@@ -323,7 +332,8 @@ class MarqueeAppTest(unittest.IsolatedAsyncioTestCase):
             self.addCleanup(patcher.stop)
 
     def _with_texts(self, app, **by_id):
-        orig = app.agents.rows(now=NOW)
+        app.agents.update(app.sources.roots)
+        orig = app.agents.rows(now=NOW, show_main=False)
         return [(name, [dict(r, text=by_id[r["id"]]) if r["id"] in by_id else r for r in grp])
                 for name, grp in orig]
 
@@ -457,7 +467,6 @@ class MarqueeAppTest(unittest.IsolatedAsyncioTestCase):
 
     async def test_marquee_timer_fires(self):
         app = make_app()
-        app.agents.set_root(fx.ROOT)
         w = text_width(100)
         long_p = "0123456789" + "t" * w
         groups = self._with_texts(app, **{fx.PLANNER: long_p})
@@ -484,9 +493,7 @@ class ViewScreenTest(unittest.IsolatedAsyncioTestCase):
             self.assertTrue(steps.header_text().startswith("Checker [working"))
             self.assertIs(steps.state, app.views[fx.CHECKER])
             self.assertIs(app.focused, steps)
-            hints = text_of(app.screen.query_one("#hints"))
-            for part in ("Enter fold", "M-a all", "> follow", "o pager", "Esc back", "q back"):
-                self.assertIn(part, hints)
+            self.assertEqual(len(app.screen.query("#hints")), 0)  # keys live in the ? help dialog now
 
     async def test_open_on_parent_opens_view(self):
         app = make_app()
@@ -567,8 +574,9 @@ class ViewScreenTest(unittest.IsolatedAsyncioTestCase):
             await open_view(pilot, app, downs=1)  # Checker
             rows = app.agents.rows
 
-            def without_checker(now):
-                return [(name, [r for r in group if r["id"] != fx.CHECKER]) for name, group in rows(now=now)]
+            def without_checker(now, show_main=True):
+                return [(name, [r for r in group if r["id"] != fx.CHECKER])
+                        for name, group in rows(now=now, show_main=show_main)]
 
             with mock.patch.object(app.agents, "rows", side_effect=without_checker):
                 app.refresh_data()
@@ -577,11 +585,10 @@ class ViewScreenTest(unittest.IsolatedAsyncioTestCase):
             self.assertIsNone(find(tree.root, fx.CHECKER))
             self.assertIs(app.focused, tree)
             await open_view(pilot, app)
-            app.resolver.root = "other-root"  # the pane's conversation switched
+            app.sources.root = "other-root"  # the pane's conversation switched
             app.refresh_data()
             await pilot.pause()
             self.assertIsInstance(app.screen, ListScreen)
-            self.assertEqual(app.views, {})
             app.refresh_data()
             await pilot.pause()
             self.assertIsNone(app.return_value)
@@ -703,6 +710,131 @@ class AppKeysTest(unittest.IsolatedAsyncioTestCase):
             await pilot.press("J")
             await pilot.pause()
             self.assertEqual(tree.selected_id(), fx.CHECKER)
+
+
+@unittest.skipUnless(HAVE_TEXTUAL, "textual not installed")
+class HelpDialogTest(unittest.IsolatedAsyncioTestCase):
+    async def test_question_mark_opens_help_on_both_screens(self):
+        app = make_app()
+        async with app.run_test(size=SIZE) as pilot:
+            await start(pilot, app)
+            await pilot.press("question_mark")
+            await pilot.pause()
+            self.assertIsInstance(app.screen, app_mod.HelpScreen)
+            await pilot.press("escape")
+            await pilot.pause()
+            self.assertIsInstance(app.screen, ListScreen)
+            await open_view(pilot, app)
+            await pilot.press("question_mark")
+            await pilot.pause()
+            self.assertIsInstance(app.screen, app_mod.HelpScreen)
+            await pilot.press("question_mark")
+            await pilot.pause()
+            self.assertIsInstance(app.screen, ViewScreen)
+
+    async def test_user_keys_listed(self):
+        app = make_app(settings=dict(SETTINGS, keys={"down": ["J"]}))
+        async with app.run_test(size=SIZE) as pilot:
+            await start(pilot, app)
+            await pilot.press("question_mark")
+            await pilot.pause()
+            body = str(app.screen.query_one("#helpbody").content)
+            line = next(l for l in body.splitlines() if l.split()[:1] == ["down"])
+            for key in ("Down", "C-n", "J"):
+                self.assertIn(key, line)
+            self.assertIn("Mouse", body)
+            self.assertRegex(body, r"help\s+\?\s+both")
+
+    async def test_q_closes_only_the_dialog(self):
+        app = make_app()
+        async with app.run_test(size=SIZE) as pilot:
+            await start(pilot, app)
+            await pilot.press("question_mark")
+            await pilot.pause()
+            await pilot.press("q")
+            await pilot.pause()
+            self.assertIsInstance(app.screen, ListScreen)
+            self.assertIsNone(app.return_code)  # still running
+
+    async def test_keys_do_not_leak_to_list(self):
+        app = make_app()
+        async with app.run_test(size=SIZE) as pilot:
+            tree = await start(pilot, app)
+            await pilot.press("question_mark")
+            await pilot.pause()
+            await pilot.press("ctrl+n")
+            await pilot.press("escape")
+            await pilot.pause()
+            self.assertEqual(tree.selected_id(), fx.PLANNER)
+
+    async def test_close_returns_to_paused_view_unchanged(self):
+        app = make_app()
+        async with app.run_test(size=SIZE) as pilot:
+            await start(pilot, app)
+            steps = await open_view(pilot, app)
+            await pilot.press("ctrl+p")
+            await pilot.pause()
+            self.assertFalse(steps.state.follow)
+            before = (steps.state.cursor, steps.state.top)
+            await pilot.press("question_mark")
+            await pilot.pause()
+            await pilot.press("escape")
+            await pilot.pause()
+            self.assertIsInstance(app.screen, ViewScreen)
+            self.assertFalse(steps.state.follow)
+            self.assertEqual((steps.state.cursor, steps.state.top), before)
+
+
+@unittest.skipUnless(HAVE_TEXTUAL, "textual not installed")
+class TreeMouseTest(unittest.IsolatedAsyncioTestCase):
+    # Rows with main_rows off: 0 Working, 1 Planner (has Checker), 2 Checker, 3 Completed, 4 Reviewer.
+    async def test_double_click_leaf_opens_view(self):
+        app = make_app()
+        async with app.run_test(size=SIZE) as pilot:
+            await start(pilot, app)
+            await pilot.double_click("#tree", offset=(20, 4))
+            await pilot.pause()
+            self.assertIsInstance(app.screen, ViewScreen)
+            self.assertEqual(app.screen.row_id, fx.REVIEWER)
+
+    async def test_double_click_parent_folds(self):
+        app = make_app()
+        async with app.run_test(size=SIZE) as pilot:
+            tree = await start(pilot, app)
+            await pilot.double_click("#tree", offset=(20, 1))
+            await pilot.pause()
+            self.assertIsInstance(app.screen, ListScreen)
+            self.assertFalse(find(tree.root, fx.PLANNER).is_expanded)
+            await pilot.double_click("#tree", offset=(20, 1))
+            await pilot.pause()
+            self.assertTrue(find(tree.root, fx.PLANNER).is_expanded)
+
+    async def test_double_click_group_folds(self):
+        app = make_app()
+        async with app.run_test(size=SIZE) as pilot:
+            tree = await start(pilot, app)
+            await pilot.double_click("#tree", offset=(6, 3))
+            await pilot.pause()
+            self.assertFalse(tree.root.children[1].is_expanded)  # Completed
+
+    async def test_single_click_only_highlights(self):
+        app = make_app()
+        async with app.run_test(size=SIZE) as pilot:
+            tree = await start(pilot, app)
+            await pilot.click("#tree", offset=(20, 4))
+            await pilot.pause()
+            self.assertEqual(tree.selected_id(), fx.REVIEWER)
+            await pilot.click("#tree", offset=(20, 1))
+            await pilot.pause()
+            self.assertIsInstance(app.screen, ListScreen)
+            self.assertTrue(find(tree.root, fx.PLANNER).is_expanded)
+
+    async def test_tree_fold_setting_starts_folded(self):
+        app = make_app(settings=dict(SETTINGS, tree_fold="fold"))
+        async with app.run_test(size=SIZE) as pilot:
+            tree = await start(pilot, app)
+            self.assertFalse(tree.root.children[0].is_expanded)  # Working
+            self.assertFalse(find(tree.root, fx.PLANNER).is_expanded)
 
     async def test_pager_from_view(self):
         app = make_app()

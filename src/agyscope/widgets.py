@@ -232,6 +232,15 @@ def _columns(cells: dict, role_width: int, total_width: int, cols: Optional[dict
     return label
 
 
+def role_style(row: dict, styles: dict) -> Optional[Style]:
+    """Role cell style by row kind: workflow agents in the `workflow` color, main rows bold,
+    subagents unstyled."""
+    style = styles.get("workflow") if row.get("kind") == "workflow" else None
+    if row.get("main"):
+        style = (style or Style()) + Style(bold=True)
+    return style
+
+
 def row_columns(row: dict, label_width: int, total_width: int, state_styles=None,
                 cols: Optional[dict] = None, text_offset: int = 0) -> Text:
     """Tree label of a subagent row: role cut to `label_width` cells, then colored state, model, age and
@@ -239,7 +248,8 @@ def row_columns(row: dict, label_width: int, total_width: int, state_styles=None
     c = DEFAULT_COLS if cols is None else cols
     styles = FALLBACK_STYLES if state_styles is None else state_styles
     model = row.get("model")
-    cells = {"role": (row["role"], None), "state": (row["state"], styles.get(row["state"])),
+    role = ("~ " + row["role"]) if row.get("linked") else row["role"]
+    cells = {"role": (role, role_style(row, styles)), "state": (row["state"], styles.get(row["state"])),
              "model": (model if model and model != "-" else "", None),
              "age": (_short_age(row.get("age") or "", c["age"]), None), "text": (row.get("text") or "", None)}
     return _columns(cells, label_width, total_width, c, text_offset=text_offset)
@@ -392,12 +402,13 @@ class SubagentTree(Tree, inherit_bindings=False):
             super().__init__()
             self.id = id
 
-    def __init__(self, state_styles=None, cols=None, **kw):
+    def __init__(self, state_styles=None, cols=None, start_folded=False, **kw):
         super().__init__("subagents", **kw)
         self.state_styles = FALLBACK_STYLES if state_styles is None else state_styles
         self.cols = dict(DEFAULT_COLS if cols is None else cols)
+        self.start_folded = start_folded  # rows with children first appear folded (tree_fold = "fold")
         self.show_root = False
-        self.auto_expand = False  # a click highlights; folding is the toggle icon or `open`
+        self.auto_expand = False  # a click highlights; folding is the toggle icon, a double-click or `open`
         self.expanded_ids = set()
         self._known_ids = set()
         self._group_nodes = {}  # group name -> node
@@ -509,7 +520,7 @@ class SubagentTree(Tree, inherit_bindings=False):
             for i, name in enumerate(names):
                 if name not in self._group_nodes:
                     before = i if i < len(self.root.children) else None
-                    expand = self._group_expanded.get(name, True)
+                    expand = self._group_expanded.get(name, not self.start_folded)
                     self._group_nodes[name] = self.root.add(name, before=before, expand=expand)
             width = self.scrollable_content_region.width or 200
             same_marquee = (
@@ -529,7 +540,7 @@ class SubagentTree(Tree, inherit_bindings=False):
                     offset = self._marquee_offset if same_marquee and cid == self._marquee_id else 0
                     label = self._label(parent, rows[cid], width, text_offset=offset)
                     if node is None:
-                        expand = cid in self.expanded_ids or cid not in self._known_ids
+                        expand = cid in self.expanded_ids or (cid not in self._known_ids and not self.start_folded)
                         before = i if i < len(parent.children) else None
                         node = parent.add(label, cid, before=before, expand=expand)
                         self._by_id[cid] = node
@@ -581,6 +592,25 @@ class SubagentTree(Tree, inherit_bindings=False):
     def on_resize(self, event) -> None:
         """Lays the labels out again for the new width (columns appear, disappear or grow)."""
         self.relabel()
+
+    async def _on_click(self, event) -> None:
+        """A double-click on a row folds or unfolds it when it has children, else posts OpenLeaf.
+        The first click of the series already moved the cursor (or folded, on the icon), so a
+        double-click on the fold icon is dropped instead of folding back. Textual then skips
+        Tree._on_click (prevent_default); other clicks fall through to it."""
+        meta = event.style.meta
+        if event.chain < 2 or "line" not in meta:
+            return
+        event.prevent_default()
+        if meta.get("toggle", False):
+            return
+        async with self.lock:
+            node = self.get_node_at_line(meta["line"])
+            if node is not None:
+                if node.allow_expand:
+                    node.toggle()
+                elif node.data is not None:
+                    self.post_message(self.OpenLeaf(node.data))
 
     def _key(self, node) -> str:
         return str(node.label) if node.data is None else node.data

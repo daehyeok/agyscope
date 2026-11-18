@@ -101,6 +101,61 @@ def presence_conversation(pid, app_dir=None, lsof="lsof", proc=PROC):
     return presence_lock(open_files(pid, lsof, proc), app_dir)[0]
 
 
+def parse_lsof(data):
+    """{pid: [path, ...]} from `lsof -F pn` output (bytes or str); other fields are ignored."""
+    if isinstance(data, bytes):
+        data = data.decode("utf-8", "replace")
+    out, pid = {}, None
+    for line in (data or "").splitlines():
+        if line.startswith("p"):
+            try:
+                pid = int(line[1:])
+            except ValueError:
+                pid = None
+            if pid is not None:
+                out.setdefault(pid, [])
+        elif line.startswith("n") and pid is not None:
+            out[pid].append(line[1:])
+    return out
+
+
+def held_locks(paths):
+    """[(conversation, data dir)] for every <dir>/presence/<id>.lock in paths, each once, in order."""
+    seen, out = set(), []
+    for path in paths:
+        d, base = os.path.split(path)
+        m = LOCK.match(base)
+        if m and os.path.basename(d) == "presence" and m.group(1) not in seen:
+            seen.add(m.group(1))
+            out.append((m.group(1), os.path.dirname(d)))
+    return out
+
+
+def lock_paths(app_dirs):
+    """Every presence/*.lock file under the given data directories (existing ones only)."""
+    out = []
+    for app in dict.fromkeys(a for a in app_dirs if a):
+        d = os.path.join(app, "presence")
+        try:
+            names = os.listdir(d)
+        except OSError:
+            continue
+        out.extend(os.path.join(d, n) for n in sorted(names) if LOCK.match(n))
+    return out
+
+
+def proc_all_files(proc=PROC):
+    """Every path any process has open according to /proc/*/fd (empty where /proc is missing)."""
+    try:
+        pids = [p for p in os.listdir(proc) if p.isdigit()]
+    except OSError:
+        return []
+    out = []
+    for p in pids:
+        out.extend(proc_files(p, proc) or [])
+    return out
+
+
 class Resolver:
     """fallback: optional callable returning (conversation, app_dir), either may be None;
     asked when the pid gives no answer (e.g. the Rex block pointer)."""

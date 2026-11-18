@@ -196,13 +196,14 @@ if HAVE_TEXTUAL:
     class TreeHost(App):
         """Mounts one SubagentTree and records the messages it posts."""
 
-        def __init__(self, cols=None):
+        def __init__(self, cols=None, start_folded=False):
             super().__init__()
             self.cols = cols
+            self.start_folded = start_folded
             self.posted = []
 
         def compose(self):
-            yield SubagentTree(cols=self.cols)
+            yield SubagentTree(cols=self.cols, start_folded=self.start_folded)
 
         def on_subagent_tree_selected(self, message):
             self.posted.append(("selected", message.id))
@@ -396,6 +397,92 @@ def line_of(lines, role):
     return next(line for line in lines if role in line)
 
 
+@unittest.skipUnless(HAVE_TEXTUAL, "textual not installed")
+class SubagentTreeMouseAndFoldTest(unittest.IsolatedAsyncioTestCase):
+    # Fixture rows: 0 Working, 1 Planner (has Checker), 2 Checker, 3 Completed, 4 Reviewer.
+    async def test_double_click_parent_toggles(self):
+        async with TreeHost().run_test(size=SIZE) as pilot:
+            tree = pilot.app.query_one(SubagentTree)
+            tree.update_groups(fixture_groups())
+            await pilot.pause()
+            await pilot.double_click(SubagentTree, offset=(20, 1))
+            await pilot.pause()
+            self.assertFalse(find(tree.root, fx.PLANNER).is_expanded)
+            await pilot.double_click(SubagentTree, offset=(20, 1))
+            await pilot.pause()
+            self.assertTrue(find(tree.root, fx.PLANNER).is_expanded)
+
+    async def test_double_click_group_toggles(self):
+        async with TreeHost().run_test(size=SIZE) as pilot:
+            tree = pilot.app.query_one(SubagentTree)
+            tree.update_groups(fixture_groups())
+            await pilot.pause()
+            await pilot.double_click(SubagentTree, offset=(5, 0))
+            await pilot.pause()
+            self.assertFalse(tree.root.children[0].is_expanded)
+
+    async def test_double_click_leaf_posts_open(self):
+        async with TreeHost().run_test(size=SIZE) as pilot:
+            tree = pilot.app.query_one(SubagentTree)
+            tree.update_groups(fixture_groups())
+            await pilot.pause()
+            await pilot.double_click(SubagentTree, offset=(20, 4))
+            await pilot.pause()
+            self.assertIn(("open", fx.REVIEWER), pilot.app.posted)
+
+    async def test_single_click_keeps_fold(self):
+        async with TreeHost().run_test(size=SIZE) as pilot:
+            tree = pilot.app.query_one(SubagentTree)
+            tree.update_groups(fixture_groups())
+            await pilot.pause()
+            await pilot.click(SubagentTree, offset=(20, 1))
+            await pilot.pause()
+            self.assertEqual(tree.selected_id(), fx.PLANNER)
+            self.assertTrue(find(tree.root, fx.PLANNER).is_expanded)
+            self.assertNotIn(("open", fx.PLANNER), pilot.app.posted)
+
+    async def test_double_click_on_icon_toggles_once(self):
+        async with TreeHost().run_test(size=SIZE) as pilot:
+            tree = pilot.app.query_one(SubagentTree)
+            tree.update_groups(fixture_groups())
+            await pilot.pause()
+            x, icon_x = 0, None  # the cell whose style marks it as Planner's fold icon
+            for seg in tree.render_line(1):
+                if seg.style is not None and seg.style.meta.get("toggle"):
+                    icon_x = x
+                    break
+                x += col_width(seg.text)
+            self.assertIsNotNone(icon_x)
+            await pilot.click(SubagentTree, offset=(icon_x, 1))
+            await pilot.pause()
+            self.assertFalse(find(tree.root, fx.PLANNER).is_expanded)  # sanity: that is the icon
+            await pilot.double_click(SubagentTree, offset=(icon_x, 1))
+            await pilot.pause()
+            self.assertTrue(find(tree.root, fx.PLANNER).is_expanded)  # the second click is dropped
+
+    async def test_start_folded(self):
+        async with TreeHost(start_folded=True).run_test(size=SIZE) as pilot:
+            tree = pilot.app.query_one(SubagentTree)
+            tree.update_groups(fixture_groups())
+            await pilot.pause()
+            self.assertTrue(all(not g.is_expanded for g in tree.root.children))
+            self.assertFalse(find(tree.root, fx.PLANNER).is_expanded)
+            tree.root.children[0].expand()
+            find(tree.root, fx.PLANNER).expand()
+            tree.update_groups(fixture_groups())
+            await pilot.pause()
+            self.assertTrue(tree.root.children[0].is_expanded)
+            self.assertTrue(find(tree.root, fx.PLANNER).is_expanded)  # the user's unfold survives
+
+    async def test_default_starts_unfolded(self):
+        async with TreeHost().run_test(size=SIZE) as pilot:
+            tree = pilot.app.query_one(SubagentTree)
+            tree.update_groups(fixture_groups())
+            await pilot.pause()
+            self.assertTrue(all(g.is_expanded for g in tree.root.children))
+            self.assertTrue(find(tree.root, fx.PLANNER).is_expanded)
+
+
 def col_of(line, text):
     """Screen column where `text` starts in `line`."""
     return col_width(line[:line.index(text)])
@@ -462,6 +549,33 @@ class ColumnsTreeTest(unittest.IsolatedAsyncioTestCase):
 
 @unittest.skipUnless(HAVE_TEXTUAL, "textual not installed")
 class ColumnsTest(unittest.TestCase):
+    def test_linked_row_marked(self):
+        plain = row_columns(dict(ROLE_ROW, linked=True), 18, 120).plain
+        self.assertTrue(plain.startswith("~ Planner"))
+        self.assertTrue(row_columns(ROLE_ROW, 18, 120).plain.startswith("Planner"))
+
+    def test_role_style_by_kind(self):
+        def span_style(label, at):
+            return next((s.style for s in label.spans if s.start <= at < s.end), None)
+        styles = dict(FALLBACK_STYLES, workflow=Style(color="#666666"))
+
+        def state_at(label):
+            return label.plain.index("waiting")
+        sub = row_columns(dict(ROLE_ROW, kind="subagent"), 18, 120, styles)
+        self.assertIsNone(span_style(sub, 0))
+        wf = row_columns(dict(ROLE_ROW, kind="workflow", linked=True), 18, 120, styles)
+        self.assertTrue(wf.plain.startswith("~ Planner"))
+        self.assertEqual(span_style(wf, 0).color, Style(color="#666666").color)  # the "~" too
+        self.assertFalse(span_style(wf, 0).bold)
+        main = row_columns(dict(ROLE_ROW, kind="conversation", main=True), 18, 120, styles)
+        self.assertTrue(span_style(main, 0).bold)
+        self.assertIsNone(span_style(main, 0).color)
+        wf_main = row_columns(dict(ROLE_ROW, kind="workflow", main=True), 18, 120, styles)
+        self.assertTrue(span_style(wf_main, 0).bold)
+        self.assertEqual(span_style(wf_main, 0).color, Style(color="#666666").color)
+        for label in (sub, wf, main, wf_main):  # the state cell keeps its state color
+            self.assertEqual(span_style(label, state_at(label)), styles["waiting"])
+
     def test_narrow_drops_columns(self):
         every = ("role", "state", "model", "age", "text")
         fixed = DEFAULT_COLS["role"] + 1 + DEFAULT_COLS["state"] + 1 + DEFAULT_COLS["age"]

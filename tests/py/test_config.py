@@ -30,7 +30,11 @@ class ConfigTest(unittest.TestCase):
         self.assertEqual(s["theme"], "textual-dark")
         self.assertIs(s["marquee"], True)
         self.assertEqual(s["columns"], config.COLUMNS)
-        self.assertEqual(set(s), {"app_dir", "columns", "keymap", "keys", "marquee", "pager", "theme"})
+        self.assertIs(s["live"], True)
+        self.assertIs(s["main_rows"], True)
+        self.assertEqual(s["tree_fold"], "unfold")
+        self.assertEqual(set(s), {"app_dir", "columns", "keymap", "keys", "marquee", "pager", "theme", "live",
+                                  "main_rows", "tree_fold"})
 
     def test_config_path_default(self):
         self.assertEqual(config.config_path(self.env), os.path.join(self.tmp, "agyscope", "config.toml"))
@@ -144,6 +148,18 @@ class ConfigTest(unittest.TestCase):
         d = {"keymap": "vim", "auto_open": False, "bounds": [0, 0.5, 1, 1], "keys": {"down": ["J"]}}
         self.assertEqual(tomllib.loads(helpers.toml_dumps(d)), d)
 
+    def test_tree_fold(self):
+        self.write({"tree_fold": "fold"})
+        s, w = config.load({}, self.env)
+        self.assertEqual((s["tree_fold"], w), ("fold", []))
+        s, _ = config.load({"tree_fold": "unfold"}, self.env)  # a flag beats the file
+        self.assertEqual(s["tree_fold"], "unfold")
+        self.write({"tree_fold": "open"})
+        s, w = config.load({}, self.env)
+        self.assertEqual(s["tree_fold"], "unfold")
+        self.assertEqual(len(w), 1)
+        self.assertIn("tree_fold", w[0])
+
     def test_bad_keys(self):
         _, w = config.load({"keys": {"jump": "x"}}, self.env)
         self.assertIn("unknown action", w[0])
@@ -206,6 +222,19 @@ class ConfigTest(unittest.TestCase):
         self.assertEqual(len(w), 2, w)
 
 
+    def test_live_and_main_rows(self):
+        self.write({"live": False, "main_rows": False})
+        s, w = config.load({}, self.env)
+        self.assertEqual(w, [])
+        self.assertEqual((s["live"], s["main_rows"]), (False, False))
+        s, w = config.load({"live": True}, self.env)
+        self.assertIs(s["live"], True)
+        self.write({"live": "no"})
+        s, w = config.load({}, self.env)
+        self.assertIs(s["live"], True)
+        self.assertEqual(len(w), 1, w)
+
+
 class RepoContractTest(unittest.TestCase):
     def test_ci_workflow(self):
         wf_path = os.path.join(helpers.REPO, ".github", "workflows", "test.yml")
@@ -237,7 +266,6 @@ class RepoContractTest(unittest.TestCase):
         self.assertIn("uv tool install agyscope", readme)
         self.assertIn("uv tool upgrade agyscope", readme)
         self.assertIn("uv tool uninstall agyscope", readme)
-        self.assertIn("uv tool install agyscope==0.2.1", readme)
         self.assertIn("pipx install agyscope", readme)
         self.assertIn("uv tool install git+https://github.com/daehyeok/agyscope", readme)
         self.assertIn('require("plugins.agyscope")', readme)

@@ -6,11 +6,7 @@ The hook rewrites it on every subagent start with that pane's latest root conver
 
 import os
 
-
-def state_dir(env=None):
-    env = os.environ if env is None else env
-    base = env.get("XDG_STATE_HOME") or os.path.join(os.path.expanduser("~"), ".local", "state")
-    return os.path.join(base, "agyscope")
+from ...state import state_dir  # noqa: F401  (re-exported; the hook and tests use pointer.state_dir)
 
 
 def pointer_path(block, env=None):

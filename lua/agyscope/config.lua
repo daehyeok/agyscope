@@ -24,6 +24,8 @@ M.PANEL = {
   keymap = "string",
   keys = "table",
   pager = "table",
+  live = "boolean",
+  main_rows = "boolean",
 }
 
 local function copy(v)
@@ -167,6 +169,12 @@ function M.panel_flags(panel)
   if panel.pager then
     out[#out + 1] = "--pager-json"
     out[#out + 1] = encode(panel.pager)
+  end
+  if panel.live ~= nil then
+    out[#out + 1] = panel.live and "--live" or "--no-live"
+  end
+  if panel.main_rows ~= nil then
+    out[#out + 1] = panel.main_rows and "--main-rows" or "--no-main-rows"
   end
   return out
 end

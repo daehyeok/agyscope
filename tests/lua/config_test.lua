@@ -71,6 +71,9 @@ t.check(
   rest
 )
 t.check("no flags by default", #config.panel_argv(config.resolve(), 1, "b") == 9)
+local live = table.concat(config.panel_flags({ live = false, main_rows = true }), " ")
+t.check("live and main_rows flags", live == "--no-live --main-rows", live)
+t.check("live must be boolean", not pcall(config.resolve, { panel = { live = "no" } }))
 
 -- panel block: runs through the user's shell with interactive startup files by default
 t.check("default interactive", config.resolve().interactive == true)

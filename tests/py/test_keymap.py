@@ -14,6 +14,13 @@ class KeymapTest(unittest.TestCase):
         self.assertEqual(km["Enter"], "open")
         self.assertNotIn("j", km)
 
+    def test_conversation_keys(self):
+        em, vi = keymap.build("emacs"), keymap.build("vim")
+        self.assertEqual([em[k] for k in ("m", "a", "A", "d")], ["toggle_main", "attach", "attach_under", "detach"])
+        self.assertEqual([vi[k] for k in ("m", "i", "I", "x")], ["toggle_main", "attach", "attach_under", "detach"])
+        self.assertEqual(vi["a"], "fold_all")  # vim keeps a for fold all
+        self.assertEqual(set(keymap.CONVERSATION_ACTIONS) - set(keymap.ACTIONS), set())
+
     def test_pane_actions_removed(self):
         for action in ("focus_next", "toggle_sidebar"):
             self.assertNotIn(action, keymap.ACTIONS)
@@ -67,6 +74,21 @@ class KeymapTest(unittest.TestCase):
     def test_user_key_moves_to_user_action(self):
         km = keymap.build("emacs", {"close": "C-g"})
         self.assertEqual(km["C-g"], "close")
+
+    def test_help_key_in_every_preset(self):
+        for preset in keymap.PRESETS:
+            self.assertEqual(keymap.build(preset)["?"], "help", preset)
+        self.assertEqual(keymap.build("emacs", {"help": "H"})["H"], "help")
+        self.assertEqual(keymap.from_textual("question_mark", "?"), "?")
+
+    def test_help_key_is_valid_config(self):
+        from agyscope import config
+        self.assertEqual(config._check("keys", {"help": "H"}), {"help": ["H"]})
+
+    def test_every_action_described(self):
+        self.assertEqual(set(keymap.DESCRIPTIONS), set(keymap.ACTIONS))
+        self.assertEqual(keymap.where("attach"), "list")
+        self.assertEqual(keymap.where("down"), "both")
 
     def test_unknown_preset(self):
         with self.assertRaises(ValueError):
