@@ -196,13 +196,14 @@ if HAVE_TEXTUAL:
     class TreeHost(App):
         """Mounts one SubagentTree and records the messages it posts."""
 
-        def __init__(self, cols=None):
+        def __init__(self, cols=None, start_folded=False):
             super().__init__()
             self.cols = cols
+            self.start_folded = start_folded
             self.posted = []
 
         def compose(self):
-            yield SubagentTree(cols=self.cols)
+            yield SubagentTree(cols=self.cols, start_folded=self.start_folded)
 
         def on_subagent_tree_selected(self, message):
             self.posted.append(("selected", message.id))
@@ -394,6 +395,92 @@ def screen_lines(tree):
 
 def line_of(lines, role):
     return next(line for line in lines if role in line)
+
+
+@unittest.skipUnless(HAVE_TEXTUAL, "textual not installed")
+class SubagentTreeMouseAndFoldTest(unittest.IsolatedAsyncioTestCase):
+    # Fixture rows: 0 Working, 1 Planner (has Checker), 2 Checker, 3 Completed, 4 Reviewer.
+    async def test_double_click_parent_toggles(self):
+        async with TreeHost().run_test(size=SIZE) as pilot:
+            tree = pilot.app.query_one(SubagentTree)
+            tree.update_groups(fixture_groups())
+            await pilot.pause()
+            await pilot.double_click(SubagentTree, offset=(20, 1))
+            await pilot.pause()
+            self.assertFalse(find(tree.root, fx.PLANNER).is_expanded)
+            await pilot.double_click(SubagentTree, offset=(20, 1))
+            await pilot.pause()
+            self.assertTrue(find(tree.root, fx.PLANNER).is_expanded)
+
+    async def test_double_click_group_toggles(self):
+        async with TreeHost().run_test(size=SIZE) as pilot:
+            tree = pilot.app.query_one(SubagentTree)
+            tree.update_groups(fixture_groups())
+            await pilot.pause()
+            await pilot.double_click(SubagentTree, offset=(5, 0))
+            await pilot.pause()
+            self.assertFalse(tree.root.children[0].is_expanded)
+
+    async def test_double_click_leaf_posts_open(self):
+        async with TreeHost().run_test(size=SIZE) as pilot:
+            tree = pilot.app.query_one(SubagentTree)
+            tree.update_groups(fixture_groups())
+            await pilot.pause()
+            await pilot.double_click(SubagentTree, offset=(20, 4))
+            await pilot.pause()
+            self.assertIn(("open", fx.REVIEWER), pilot.app.posted)
+
+    async def test_single_click_keeps_fold(self):
+        async with TreeHost().run_test(size=SIZE) as pilot:
+            tree = pilot.app.query_one(SubagentTree)
+            tree.update_groups(fixture_groups())
+            await pilot.pause()
+            await pilot.click(SubagentTree, offset=(20, 1))
+            await pilot.pause()
+            self.assertEqual(tree.selected_id(), fx.PLANNER)
+            self.assertTrue(find(tree.root, fx.PLANNER).is_expanded)
+            self.assertNotIn(("open", fx.PLANNER), pilot.app.posted)
+
+    async def test_double_click_on_icon_toggles_once(self):
+        async with TreeHost().run_test(size=SIZE) as pilot:
+            tree = pilot.app.query_one(SubagentTree)
+            tree.update_groups(fixture_groups())
+            await pilot.pause()
+            x, icon_x = 0, None  # the cell whose style marks it as Planner's fold icon
+            for seg in tree.render_line(1):
+                if seg.style is not None and seg.style.meta.get("toggle"):
+                    icon_x = x
+                    break
+                x += col_width(seg.text)
+            self.assertIsNotNone(icon_x)
+            await pilot.click(SubagentTree, offset=(icon_x, 1))
+            await pilot.pause()
+            self.assertFalse(find(tree.root, fx.PLANNER).is_expanded)  # sanity: that is the icon
+            await pilot.double_click(SubagentTree, offset=(icon_x, 1))
+            await pilot.pause()
+            self.assertTrue(find(tree.root, fx.PLANNER).is_expanded)  # the second click is dropped
+
+    async def test_start_folded(self):
+        async with TreeHost(start_folded=True).run_test(size=SIZE) as pilot:
+            tree = pilot.app.query_one(SubagentTree)
+            tree.update_groups(fixture_groups())
+            await pilot.pause()
+            self.assertTrue(all(not g.is_expanded for g in tree.root.children))
+            self.assertFalse(find(tree.root, fx.PLANNER).is_expanded)
+            tree.root.children[0].expand()
+            find(tree.root, fx.PLANNER).expand()
+            tree.update_groups(fixture_groups())
+            await pilot.pause()
+            self.assertTrue(tree.root.children[0].is_expanded)
+            self.assertTrue(find(tree.root, fx.PLANNER).is_expanded)  # the user's unfold survives
+
+    async def test_default_starts_unfolded(self):
+        async with TreeHost().run_test(size=SIZE) as pilot:
+            tree = pilot.app.query_one(SubagentTree)
+            tree.update_groups(fixture_groups())
+            await pilot.pause()
+            self.assertTrue(all(g.is_expanded for g in tree.root.children))
+            self.assertTrue(find(tree.root, fx.PLANNER).is_expanded)
 
 
 def col_of(line, text):

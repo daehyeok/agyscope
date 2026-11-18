@@ -42,11 +42,10 @@ Install the `agyscope` and `agyscope-rex-hook` commands from PyPI with uv:
 uv tool install agyscope
 ```
 
-Upgrade, pin a version, or uninstall:
+Upgrade or uninstall:
 
 ```sh
 uv tool upgrade agyscope
-uv tool install agyscope==0.2.2
 uv tool uninstall agyscope
 ```
 
@@ -113,7 +112,7 @@ stays readable.
 
 Settings flags: `--app-dir DIR`, `--keymap emacs|vim`, `--keys-json JSON`,
 `--pager-json JSON`, `--theme NAME`, `--marquee` / `--no-marquee`, `--live` / `--no-live`,
-`--main-rows` / `--no-main-rows`
+`--main-rows` / `--no-main-rows`, `--tree-fold unfold|fold`
 (see [Configuration](#configuration)). `agyscope --help` lists them all.
 
 ## Configuration
@@ -121,7 +120,8 @@ Settings flags: `--app-dir DIR`, `--keymap emacs|vim`, `--keys-json JSON`,
 For each setting, the first source that sets it wins:
 
 1. command-line flags (`--app-dir`, `--keymap`, `--keys-json`, `--pager-json`, `--theme`,
-   `--marquee` / `--no-marquee`, `--live` / `--no-live`, `--main-rows` / `--no-main-rows`);
+   `--marquee` / `--no-marquee`, `--live` / `--no-live`, `--main-rows` / `--no-main-rows`,
+   `--tree-fold`);
 2. the config file `${XDG_CONFIG_HOME:-~/.config}/agyscope/config.toml` (normally
    `~/.config/agyscope/config.toml`), or the file named by `AGYSCOPE_CONFIG`;
 3. the defaults.
@@ -140,6 +140,7 @@ For each setting, the first source that sets it wins:
 | `marquee` | `true` | Horizontally scroll the highlighted row's **Last step** cell when it overflows. |
 | `live` | `true` | Also list every running agent on the host (held presence locks), not only the pane's conversation and attachments. |
 | `main_rows` | `true` | Start with each conversation's own row shown (key `m` toggles). |
+| `tree_fold` | `"unfold"` | How list rows with children first appear: `"unfold"` or `"fold"`. Folds you change are kept across refreshes. |
 | `columns` | `{role = 24, state = 8, model = 22, age = 5}` | Initial list column widths in cells (`role` 8–80, `state` 4–20, `model` 6–60, `age` 3–10). |
 
 The data directory is usually found without `app_dir`: from the presence lock the agent
@@ -209,9 +210,15 @@ Then set `theme = "catppuccin-mocha"` in `~/.config/agyscope/config.toml`.
 
 ## Keys
 
-agyscope is read-only, and keys not listed here do nothing. Keys in the "always" column
-work in every preset. On the list screen, clicking a subtree's `▶`/`▼` icon folds or
-unfolds it. On the view screen, the mouse wheel scrolls steps freely line-by-line, and
+agyscope is read-only, and keys not listed here do nothing. Press `?` on any screen for a
+dialog listing every action with its keys in your keymap, including the keys you added
+under `[keys]` (Esc, `?` or `q` closes it); the screens have no key hint rows. Keys in the
+"always" column work in every preset.
+
+Mouse: on the list screen, a click highlights a row and clicking a subtree's `▶`/`▼` icon
+folds or unfolds it. Double-clicking a row that has children (a group, or a conversation or
+subagent with subagents) folds or unfolds it; double-clicking a row without children opens
+its view. On the view screen, the mouse wheel scrolls steps freely line-by-line, and
 clicking an item's header toggles its fold.
 
 | Action | Always | emacs (default) | vim |
@@ -224,6 +231,7 @@ clicking an item's header toggles its fold.
 | `pager` (open full transcript in pager) | | `M-o`, `o` | `o` |
 | `back` (view: return to list; list: collapse/parent) | Left, Esc | `C-g` | `Esc` |
 | `close` (list: exit; view: return to list) | | `q` | `q` |
+| `help` (show every action's keys) | `?` | | |
 | `toggle_main` (list: hide/show conversation rows) | | `m` | `m` |
 | `attach` (list: pick a conversation to watch) | | `a` | `i` |
 | `attach_under` (list: pick one to attach under the highlighted conversation) | | `A` | `I` |
@@ -299,8 +307,9 @@ resumes following. The pager action opens the whole view, fully unfolded, in you
 **Navigation and preserved state.** Both screens refresh every second. On the list
 screen, `open` (`Enter`, `Right`, emacs `Tab`, vim `Space`) opens the selected subagent's
 view—including parent subagents that have children—or folds/unfolds a group row.
-Subtrees can be folded by clicking their `▶`/`▼` icon or with `fold_all` (`M-a` / `a`),
-and `back` collapses an expanded subtree or moves to its parent. The list keeps its
+Subtrees can be folded by clicking their `▶`/`▼` icon, double-clicking the row, or with
+`fold_all` (`M-a` / `a`), and `back` collapses an expanded subtree or moves to its parent.
+Set `tree_fold = "fold"` to start with subtrees folded. The list keeps its
 cursor and folds while a view is open, and each subagent remembers its own scroll
 position, folds, and follow state across reopens (opening a subagent for the first time
 starts in follow mode). If the subagent being viewed disappears (for example, when the

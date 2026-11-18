@@ -105,7 +105,10 @@ class MultiRootTest(unittest.IsolatedAsyncioTestCase):
             await pilot.press("m")
             await pilot.pause()
             self.assertIsNotNone(find(tree.root, fx.ROOT))
-            self.assertIn("m main", text_of(app.query_one("#listhint")))
+            await pilot.press("question_mark")
+            await pilot.pause()
+            help_body = str(app.screen.query_one("#helpbody").content)
+            self.assertRegex(help_body, r"toggle_main\s+m\s+list")
 
     async def test_picker_filters_attaches_under_and_esc(self):
         app = make_app(settings=MAIN)

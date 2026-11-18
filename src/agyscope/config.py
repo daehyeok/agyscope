@@ -32,8 +32,10 @@ DEFAULTS = {
     "marquee": True,
     "live": True,
     "main_rows": True,
+    "tree_fold": "unfold",
     "columns": dict(COLUMNS),
 }
+TREE_FOLD = ("unfold", "fold")
 
 INTEGRATION_KEYS = frozenset({"bounds", "auto_open", "interactive", "command"})
 LEGACY_WARNING = "config.json is no longer read; convert it to config.toml"
@@ -96,6 +98,10 @@ def _check(name, value):
         return value
     if name in ("marquee", "live", "main_rows"):
         return check_bool(value)
+    if name == "tree_fold":
+        if value not in TREE_FOLD:
+            raise ValueError("must be one of %s" % ", ".join('"%s"' % v for v in TREE_FOLD))
+        return value
     if name == "columns":
         if not isinstance(value, dict):
             raise ValueError("must be a table of column -> width")

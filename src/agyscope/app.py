@@ -27,17 +27,23 @@ from .viewstate import ViewState
 from .widgets import MARQUEE_STEP_S, ColumnHeader, ColumnsChanged, StepView, SubagentTree
 
 REFRESH_S = 1.0
-_HINT_FIRST = {"open": "Enter", "back": "Esc"}  # action -> key the hints show when it is bound
+MOUSE_HELP = (
+    ("click", "highlight a row; view: fold/unfold a step's title"),
+    ("click \u25b6/\u25bc", "fold/unfold a subtree"),
+    ("double-click", "fold/unfold a row with children; open a row without"),
+    ("wheel", "scroll"),
+    ("drag header", "resize list columns"),
+)
 
 
 class ListScreen(Screen):
-    """The subagent tree, full width, under a key hint row and the column titles."""
+    """The subagent tree, full width, under the column titles."""
 
     def compose(self):
-        yield Static(Text(self.app.list_hints()), id="listhint")
         yield ColumnHeader(id="colhead")
         yield Static(id="empty")
-        yield SubagentTree(id="tree", state_styles=self.app.state_styles, cols=self.app.settings["columns"])
+        yield SubagentTree(id="tree", state_styles=self.app.state_styles, cols=self.app.settings["columns"],
+                           start_folded=self.app.settings["tree_fold"] == "fold")
         yield Static(id="status")
 
     def on_mount(self) -> None:
@@ -79,12 +85,14 @@ class ListScreen(Screen):
             colhead.cancel_drag()
 
     def action(self, name: str) -> None:
-        """close exits with True, open views the row under the cursor, toggle_main/attach/
+        """close exits with True, open views the row under the cursor, help/toggle_main/attach/
         attach_under/detach go to the app; the rest go to the tree."""
         tree = self.query_one("#tree", SubagentTree)
         sid = tree.selected_id()
         if name == "close":
             self.app.exit(True)
+        elif name == "help":
+            self.app.open_help()
         elif name == "pager":
             self.app.open_pager(sid)
         elif name == "open" and sid is not None:
@@ -98,6 +106,10 @@ class ListScreen(Screen):
         elif name not in keymap.CONVERSATION_ACTIONS:
             tree.action(name)
 
+    def on_subagent_tree_open_leaf(self, message: SubagentTree.OpenLeaf) -> None:
+        """A double-click on a row without children opens it, like the open key."""
+        self.app.open_view(message.id)
+
 
 class ViewScreen(Screen):
     """One subagent's steps, full screen; back and close return to the list."""
@@ -109,7 +121,6 @@ class ViewScreen(Screen):
     def compose(self):
         yield StepView(id="steps")
         yield Static(id="status")
-        yield Static(Text(self.app.view_hints()), id="hints")
 
     def on_mount(self) -> None:
         steps = self.query_one("#steps", StepView)
@@ -121,6 +132,8 @@ class ViewScreen(Screen):
     def action(self, name: str) -> None:
         if name in ("back", "close"):
             self.app.close_view()
+        elif name == "help":
+            self.app.open_help()
         elif name == "pager":
             self.app.open_pager(self.row_id)
         elif name not in keymap.CONVERSATION_ACTIONS:
@@ -206,6 +219,53 @@ class PickerScreen(ModalScreen):
         self.dismiss(None)
 
 
+def help_text(keys: dict) -> Text:
+    """Every action with its keys in `keys` (key name -> action), where it works and what it does,
+    then the mouse actions."""
+    rows = [(a, ", ".join(keymap.keys_for(keys, a)) or "-", keymap.where(a), keymap.DESCRIPTIONS[a])
+            for a in keymap.ACTIONS]
+    wa = max(len("Action"), *(len(r[0]) for r in rows))
+    wk = max(len("Keys"), *(len(r[1]) for r in rows))
+    out = Text()
+    out.append(" %-*s  %-*s  %-5s  %s\n" % (wa, "Action", wk, "Keys", "Where", "Does"), "bold")
+    for action, ks, where, desc in rows:
+        out.append(" %-*s  %-*s  %-5s  %s\n" % (wa, action, wk, ks, where, desc))
+    out.append("\n Mouse (list and view)\n", "bold")
+    wm = max(len(m) for m, _ in MOUSE_HELP)
+    for mouse, desc in MOUSE_HELP:
+        out.append(" %-*s  %s\n" % (wm, mouse, desc))
+    return out
+
+
+class HelpScreen(ModalScreen):
+    """Every action and its keys (preset plus user keys), and the mouse actions; Esc, ?, q close it."""
+
+    DEFAULT_CSS = """
+    HelpScreen { align: center middle; }
+    #help { width: auto; max-width: 95%; height: auto; max-height: 90%; border: round $accent;
+            background: $surface; }
+    #helptitle { height: 1; background: $panel; }
+    #helpbody { width: auto; height: auto; }
+    """
+    BINDINGS = [
+        Binding("escape,question_mark,q,ctrl+g", "close", show=False, priority=True),
+    ]
+
+    def __init__(self, keys: dict, preset: str) -> None:
+        super().__init__()
+        self.keys = dict(keys)
+        self.preset = preset
+
+    def compose(self):
+        from textual.containers import VerticalScroll
+        with VerticalScroll(id="help"):
+            yield Static(Text(" Keys (%s preset + your keys)   Esc / ? / q close" % self.preset), id="helptitle")
+            yield Static(help_text(self.keys), id="helpbody")
+
+    def action_close(self) -> None:
+        self.dismiss(None)
+
+
 class AgyscopeApp(App):
     """Root conversations and their subagents, refreshed every second: a list screen and a view screen.
 
@@ -214,13 +274,11 @@ class AgyscopeApp(App):
     """
 
     CSS = """
-    #listhint { height: 1; background: $panel; }
     #colhead { height: 1; text-style: bold; }
     #empty { height: 1; color: $text-muted; }
     #tree { height: 1fr; }
     #steps { height: 1fr; }
     #status { height: 1; color: $error; text-style: bold; }
-    #hints { height: 1; background: $panel; }
     """
     BINDINGS = [
         Binding("ctrl+c", "exit_false", show=False, priority=True),
@@ -283,24 +341,10 @@ class AgyscopeApp(App):
         self.list_screen = ListScreen()  # stays at the bottom of the stack while a view is shown
         return self.list_screen
 
-    def hint(self, action: str) -> str:
-        """The key to show for an action in the hints: Enter for open, Esc for back, else a preset key."""
-        keys = keymap.keys_for(self.keys, action)
-        if _HINT_FIRST.get(action) in keys:
-            return _HINT_FIRST[action]
-        always = set(k for ks in keymap.ALWAYS.values() for k in ks)
-        preferred = [k for k in keys if k not in always] or keys
-        return preferred[0] if preferred else "?"
-
-    def list_hints(self) -> str:
-        h = self.hint
-        return " Subagents  %s/%s move  %s view  %s main  %s attach  %s detach  %s close" % (
-            h("down"), h("up"), h("open"), h("toggle_main"), h("attach"), h("detach"), h("close"))
-
-    def view_hints(self) -> str:
-        h = self.hint
-        return " %s fold  %s all  %s follow  %s pager  %s back  %s back" % (
-            h("open"), h("fold_all"), h("last"), h("pager"), h("back"), h("close"))
+    def open_help(self) -> None:
+        """Shows every action's keys in the active keymap, over the current screen."""
+        if not isinstance(self.screen, HelpScreen):
+            self.push_screen(HelpScreen(self.keys, self.settings["keymap"]))
 
     def show_status(self) -> None:
         """Shows the newest status message (if any) on every screen's status line."""

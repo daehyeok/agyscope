@@ -9,6 +9,7 @@
 # marquee = true
 # live = true          # also list every running agent on this host
 # main_rows = true     # show each conversation's own row (key m toggles)
+# tree_fold = "unfold" # how list rows with children first appear: "unfold" or "fold"
 
 ## Rex hook (read by agyscope-rex-hook; ignored by agyscope)
 # bounds = [0.6, 0.04, 0.38, 0.42]

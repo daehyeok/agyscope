@@ -25,6 +25,7 @@ ${XDG_CONFIG_HOME:-~/.config}/agyscope/config.toml):
     --marquee / --no-marquee   scroll the highlighted row's Last step (default on)
     --live / --no-live         also list every running agent (default on)
     --main-rows / --no-main-rows   show each conversation's own row (default on; key m toggles)
+    --tree-fold unfold|fold    how list rows with children first appear (default unfold)
 
 Rex integration:
     --rex-block BLOCK      follow the Rex block pointer and focus BLOCK after `close`
@@ -61,13 +62,14 @@ def parse(argv):
     p.add_argument("--marquee", action=argparse.BooleanOptionalAction, default=None)
     p.add_argument("--live", action=argparse.BooleanOptionalAction, default=None)
     p.add_argument("--main-rows", action=argparse.BooleanOptionalAction, default=None)
+    p.add_argument("--tree-fold")
     return p.parse_args(argv)
 
 
 def flags_of(args):
     warnings = []
     flags = {"app_dir": args.app_dir, "keymap": args.keymap, "theme": args.theme, "marquee": args.marquee,
-             "live": args.live, "main_rows": args.main_rows}
+             "live": args.live, "main_rows": args.main_rows, "tree_fold": args.tree_fold}
     for name, raw in (("keys", args.keys_json), ("pager", args.pager_json)):
         if raw is None:
             continue

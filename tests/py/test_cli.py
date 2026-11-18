@@ -44,6 +44,11 @@ class CliTest(unittest.TestCase):
         self.assertIsNone(flags_default["theme"])
         self.assertIsNone(flags_default["marquee"])
 
+    def test_tree_fold_flag(self):
+        flags, _ = cli.flags_of(cli.parse(["--tree-fold", "fold"]))
+        self.assertEqual(flags["tree_fold"], "fold")
+        self.assertIsNone(cli.flags_of(cli.parse([]))[0]["tree_fold"])
+
     def test_live_and_main_rows_flags(self):
         flags, _ = cli.flags_of(cli.parse(["--no-live", "--main-rows"]))
         self.assertIs(flags["live"], False)

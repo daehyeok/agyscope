@@ -25,6 +25,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   listed under it once they finish. Linked rows are marked `~`.
 - Role names show the agent kind: workflow/swarm agents use the theme's `secondary` color
   (theme variable `agyscope-workflow`), main rows are bold, subagents are unchanged.
+- `?` (new `help` action, in every preset; `keys.help` adds more keys) opens a dialog
+  listing every action with all of its keys in the active keymap, including keys added
+  under `[keys]`, plus the mouse actions. Esc, `?` or `q` closes it.
+- Double-clicking a list row folds or unfolds it when it has children (a group, or a
+  conversation or subagent with subagents); on a row without children it opens the view.
+- `tree_fold` setting (`"unfold"` by default, or `"fold"`; `--tree-fold`): how list rows
+  with children first appear. Folds you change are kept across refreshes.
+
+### Removed
+
+- **Breaking (UI):** the key hint rows on the list and view screens. Press `?` instead.
 
 ### Changed
 
