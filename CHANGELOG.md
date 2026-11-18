@@ -23,6 +23,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   highlighted conversation), `d` (vim `x`) detaches the highlighted row.
 - Workflow agents named in a conversation's task logs (`[agent:<type>] ... (<id>)`) are
   listed under it once they finish. Linked rows are marked `~`.
+- Role names show the agent kind: workflow/swarm agents use the theme's `secondary` color
+  (theme variable `agyscope-workflow`), main rows are bold, subagents are unchanged.
 
 ### Changed
 
@@ -32,6 +34,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   replaced; other conversations keep their folds and an open view.
 - Source collection (`lsof`, `/proc`) runs in the background with AnyIO (new dependency)
   instead of on the UI thread; a hung `lsof` is killed after 2 seconds.
+
+### Fixed
+
+- The list now uses the theme's state colors from the start in a real terminal; before, it
+  kept the fallback colors until the theme was switched.
+
 
 ## [0.2.1] - 2026-11-16
 

@@ -42,7 +42,9 @@ class ListScreen(Screen):
 
     def on_mount(self) -> None:
         """Starts the panel: this screen is composed after App.on_mount, so the first refresh is here."""
-        self.query_one("#tree", SubagentTree).focus()
+        tree = self.query_one("#tree", SubagentTree)
+        tree.state_styles = self.app.state_styles  # a real terminal may compose this before the theme is set
+        tree.focus()
         self.app.show_status()
         self.app.start_sources()
         self.app.refresh_data()
@@ -260,6 +262,7 @@ class AgyscopeApp(App):
         except InvalidThemeError:
             self.status.append("theme %r not found; using %s" % (name, self.theme))
         self.state_styles = themes.styles_from(self.get_css_variables())
+        self.apply_state_styles()
 
     def _on_theme_changed(self, _theme) -> None:
         self.state_styles = themes.styles_from(self.get_css_variables())

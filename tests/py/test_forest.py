@@ -69,6 +69,28 @@ class AgentDBMetaTest(unittest.TestCase):
         self.assertEqual(db.recent_roots(limit=1)[0]["agent"], "gpowers-implementer")
         self.assertIsNone(AgentDB(tempfile.mkdtemp()).title_of("a"))
 
+    def test_kind_of(self):
+        app = tempfile.mkdtemp()
+        con = sqlite3.connect(os.path.join(app, "conversation_summaries.db"))
+        con.execute("CREATE TABLE conversation_summaries (conversation_id text, title text, agent_name text, "
+                    "last_modified_time datetime, parent_conversation_id text, raw_summary blob)")
+        con.executemany("INSERT INTO conversation_summaries VALUES (?,?,?,NULL,?,NULL)", [
+            ("user", "Fix login", "", ""),
+            ("wf", "", "gpowers-implementer", ""),
+            ("sub", "", "self", "user"),
+            ("sub2", "Planner", "", "user"),
+        ])
+        con.commit()
+        con.close()
+        db = AgentDB(app)
+        self.assertEqual(db.kind_of("user"), "conversation")
+        self.assertEqual(db.kind_of("wf"), "workflow")
+        self.assertEqual(db.kind_of("sub"), "subagent")
+        self.assertEqual(db.kind_of("sub2"), "subagent")
+        self.assertEqual(db.kind_of("zzz"), "subagent")
+        self.assertEqual(db.kind_of("zzz", default="conversation"), "conversation")
+        self.assertEqual(AgentDB(tempfile.mkdtemp()).kind_of("user"), "subagent")
+
 
 class TaskLogTest(unittest.TestCase):
     def test_parse_and_children(self):
@@ -204,6 +226,26 @@ class ForestTest(unittest.TestCase):
         f.update([Root(fx.ROOT, self.app, "pane"), Root(W1, self.app, "live")])
         rows = discovery.flat(f.rows(now=NOW))
         self.assertEqual([r["id"] for r in rows].count(W1), 1)
+
+    def test_row_kinds(self):
+        worker(self.app, W1)
+        worker(self.app, W2)
+        con = sqlite3.connect(os.path.join(self.app, "conversation_summaries.db"))
+        con.execute("CREATE TABLE conversation_summaries (conversation_id text, title text, agent_name text, "
+                    "last_modified_time datetime, parent_conversation_id text, raw_summary blob)")
+        con.executemany("INSERT INTO conversation_summaries VALUES (?,?,?,NULL,?,NULL)", [
+            (fx.ROOT, "Fix login", "", ""), (W1, "", "gpowers-implementer", ""), (W2, "", "sdd-pilot", "")])
+        con.commit()
+        con.close()
+        self.links.attach(W1, fx.ROOT)
+        f = discovery.Forest(self.app, links=self.links)
+        f.update([Root(fx.ROOT, self.app, "pane"), Root(W2, self.app, "live"), Root(OTHER, self.app2, "watch")])
+        kinds = {r["id"]: (r["kind"], r["main"], r["linked"]) for r in discovery.flat(f.rows(now=NOW))}
+        self.assertEqual(kinds[fx.ROOT], ("conversation", True, False))
+        self.assertEqual(kinds[W1], ("workflow", False, True))
+        self.assertEqual(kinds[fx.PLANNER], ("subagent", False, False))  # not in the database: default
+        self.assertEqual(kinds[W2], ("workflow", True, False))
+        self.assertEqual(kinds[OTHER], ("conversation", True, False))  # main row, no database
 
     def test_pane_first_then_newest(self):
         worker(self.app, OTHER, sender="user", done=False)

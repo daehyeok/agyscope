@@ -264,6 +264,9 @@ class ThemeTest(unittest.IsolatedAsyncioTestCase):
             self.assertEqual(app.theme, "nord")
             # nord success is #A3BE8C
             self.assertEqual(app.state_styles["done"].color, rich.color.Color.parse("#A3BE8C"))
+            tree = app.list_screen.query_one("#tree")
+            self.assertEqual(tree.state_styles["done"], app.state_styles["done"])  # not the fallback
+            self.assertEqual(tree.state_styles["workflow"], app.state_styles["workflow"])
 
     async def test_unknown_theme_warns(self):
         app = make_app(settings=dict(SETTINGS, theme="nope"))

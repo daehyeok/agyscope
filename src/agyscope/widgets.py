@@ -232,6 +232,15 @@ def _columns(cells: dict, role_width: int, total_width: int, cols: Optional[dict
     return label
 
 
+def role_style(row: dict, styles: dict) -> Optional[Style]:
+    """Role cell style by row kind: workflow agents in the `workflow` color, main rows bold,
+    subagents unstyled."""
+    style = styles.get("workflow") if row.get("kind") == "workflow" else None
+    if row.get("main"):
+        style = (style or Style()) + Style(bold=True)
+    return style
+
+
 def row_columns(row: dict, label_width: int, total_width: int, state_styles=None,
                 cols: Optional[dict] = None, text_offset: int = 0) -> Text:
     """Tree label of a subagent row: role cut to `label_width` cells, then colored state, model, age and
@@ -240,7 +249,7 @@ def row_columns(row: dict, label_width: int, total_width: int, state_styles=None
     styles = FALLBACK_STYLES if state_styles is None else state_styles
     model = row.get("model")
     role = ("~ " + row["role"]) if row.get("linked") else row["role"]
-    cells = {"role": (role, None), "state": (row["state"], styles.get(row["state"])),
+    cells = {"role": (role, role_style(row, styles)), "state": (row["state"], styles.get(row["state"])),
              "model": (model if model and model != "-" else "", None),
              "age": (_short_age(row.get("age") or "", c["age"]), None), "text": (row.get("text") or "", None)}
     return _columns(cells, label_width, total_width, c, text_offset=text_offset)

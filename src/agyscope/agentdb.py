@@ -192,6 +192,16 @@ class AgentDB:
         m = self._load_meta().get(conv_id)
         return (m or {}).get("parent") or None
 
+    def kind_of(self, conv_id, default="subagent"):
+        """"subagent" (has a parent), "workflow" (agent name, no parent: a workflow or swarm
+        agent) or "conversation" (neither); `default` when the database has no row for it."""
+        m = self._load_meta().get(conv_id)
+        if not m:
+            return default
+        if m["parent"]:
+            return "subagent"
+        return "workflow" if m["agent"] else "conversation"
+
     def recent_roots(self, limit=200):
         """Root conversations (no parent), most recently modified first: [{id, title, agent, modified}]."""
         roots = [m for m in self._load_meta().values() if not m["parent"]]

@@ -77,6 +77,7 @@ class ThemesTest(unittest.TestCase):
             "error": "#333333",
             "primary": "#444444",
             "accent": "#555555",
+            "secondary": "#666666",
             "foreground": "#ffffff",
             "background": "#000000",
             "text-muted": "auto 60%",
@@ -92,6 +93,13 @@ class ThemesTest(unittest.TestCase):
         self.assertTrue(styles["cmd"].bold)
         self.assertIsNone(styles["step"].color)
         self.assertTrue(styles["step"].bold)
+        self.assertEqual(styles["workflow"].color, rich.color.Color.parse("#666666"))
+        self.assertFalse(styles["workflow"].bold)
+
+    def test_workflow_override_and_fallback(self):
+        styles = themes.styles_from({"secondary": "#666666", "agyscope-workflow": "#ff8800"})
+        self.assertEqual(styles["workflow"].color, rich.color.Color.parse("#ff8800"))
+        self.assertEqual(themes.styles_from({})["workflow"].color, rich.color.Color.parse("bright_blue"))
 
     def test_agyscope_override(self):
         variables = {

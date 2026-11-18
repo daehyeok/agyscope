@@ -467,6 +467,28 @@ class ColumnsTest(unittest.TestCase):
         self.assertTrue(plain.startswith("~ Planner"))
         self.assertTrue(row_columns(ROLE_ROW, 18, 120).plain.startswith("Planner"))
 
+    def test_role_style_by_kind(self):
+        def span_style(label, at):
+            return next((s.style for s in label.spans if s.start <= at < s.end), None)
+        styles = dict(FALLBACK_STYLES, workflow=Style(color="#666666"))
+
+        def state_at(label):
+            return label.plain.index("waiting")
+        sub = row_columns(dict(ROLE_ROW, kind="subagent"), 18, 120, styles)
+        self.assertIsNone(span_style(sub, 0))
+        wf = row_columns(dict(ROLE_ROW, kind="workflow", linked=True), 18, 120, styles)
+        self.assertTrue(wf.plain.startswith("~ Planner"))
+        self.assertEqual(span_style(wf, 0).color, Style(color="#666666").color)  # the "~" too
+        self.assertFalse(span_style(wf, 0).bold)
+        main = row_columns(dict(ROLE_ROW, kind="conversation", main=True), 18, 120, styles)
+        self.assertTrue(span_style(main, 0).bold)
+        self.assertIsNone(span_style(main, 0).color)
+        wf_main = row_columns(dict(ROLE_ROW, kind="workflow", main=True), 18, 120, styles)
+        self.assertTrue(span_style(wf_main, 0).bold)
+        self.assertEqual(span_style(wf_main, 0).color, Style(color="#666666").color)
+        for label in (sub, wf, main, wf_main):  # the state cell keeps its state color
+            self.assertEqual(span_style(label, state_at(label)), styles["waiting"])
+
     def test_narrow_drops_columns(self):
         every = ("role", "state", "model", "age", "text")
         fixed = DEFAULT_COLS["role"] + 1 + DEFAULT_COLS["state"] + 1 + DEFAULT_COLS["age"]

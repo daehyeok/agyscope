@@ -191,6 +191,11 @@ Subagent state colors follow the active theme (`working`/`running` → `$warning
 `msg`/`cmd` → `$accent`, `quiet`/`dim` → `$text-muted`). Any state or step style can be
 overridden in `[variables]` with `agyscope-<state>` (such as `agyscope-waiting`).
 
+Role names show the kind of agent. Workflow and swarm agents (an agent name and no parent
+conversation, such as `/run_workflow` agents) use `$secondary`, which `agyscope-workflow`
+overrides. Each conversation's main row is bold, and subagents use the normal text color.
+Attached rows keep the `~` marker. `--once` output stays plain text.
+
 To use the shipped Catppuccin Mocha palette and state colors
 ([examples/themes/catppuccin-mocha.toml](https://github.com/daehyeok/agyscope/blob/main/examples/themes/catppuccin-mocha.toml)):
 

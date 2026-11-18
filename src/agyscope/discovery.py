@@ -140,7 +140,8 @@ class Tree:
         return {"id": r["id"], "depth": depth, "role": self.names[r["id"]], "state": state,
                 "model": self.db.model_of(r["id"], r.get("model")),
                 "age": age(now - (r.get("ts") or now)), "text": text, "t": t,
-                "parent": r.get("parent"), "linked": bool(r.get("linked")), "main": False, "tree": self}
+                "parent": r.get("parent"), "linked": bool(r.get("linked")), "main": False,
+                "kind": self.db.kind_of(r["id"]), "tree": self}
 
     def rows(self, now=None):
         """Display rows grouped: [("Working", [row...]), ("Completed", [row...])], without a main row."""
@@ -174,6 +175,7 @@ class Tree:
             rows.append({"id": self.root, "depth": 0, "role": self.names[self.root], "state": state,
                          "model": self.db.model_of(self.root), "age": age(now - (root_t.started or now)),
                          "text": text, "t": root_t, "parent": None, "linked": False, "main": True,
+                         "kind": self.db.kind_of(self.root, default="conversation"),
                          "pane": pane, "tree": self})
         base = 1 if show_main else 0
         trees = []
