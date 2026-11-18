@@ -1,6 +1,6 @@
 [project]
 name = "agyscope"
-version = "0.2.2"
+dynamic = ["version"]
 description = "Unofficial read-only subagent viewer for the Antigravity agent CLI (agy)"
 readme = "README.md"
 license = "MIT"
@@ -34,6 +34,9 @@ agyscope-rex-hook = "agyscope.integrations.rex.hook:main"
 [build-system]
 requires = ["hatchling"]
 build-backend = "hatchling.build"
+
+[tool.hatch.version]
+path = "src/agyscope/__init__.py"
 
 [tool.hatch.build.targets.sdist]
 exclude = ["docs/demo.gif", ".superpowers/"]

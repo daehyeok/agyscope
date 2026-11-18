@@ -540,6 +540,25 @@ when they're installed, and run the tests. CI runs the Python tests with uv on P
 `tests/lua/manual_toggle.lua` runs the Rex action for a given pane
 (`AGY_BLOCK=… AGY_SESSION=… rex do tests/lua/manual_toggle.lua`).
 
+### Releasing
+
+The version lives only in `src/agyscope/__init__.py` (`__version__`); `pyproject.toml`
+reads it. Between releases it stays at the latest release, and changes add their notes
+under `## [Unreleased]` in `CHANGELOG.md`.
+
+1. Release prep commit on `main`: set `__version__` to the new `X.Y.Z` and rename
+   `## [Unreleased]` to `## [X.Y.Z] - YYYY-MM-DD`.
+2. `git tag vX.Y.Z && git push origin vX.Y.Z`.
+
+The `release` workflow then checks that the tag matches `__version__`, that `## [X.Y.Z]`
+exists and that `[Unreleased]` is empty; runs the test workflow; builds the sdist and
+wheel once; publishes them to PyPI with Trusted Publishing (`pypi` environment, no
+token); and creates the GitHub Release with that CHANGELOG section as notes and the same
+files attached. If a check fails, nothing is published: fix it, move the tag
+(`git tag -f`, `git push -f origin vX.Y.Z`) and push again. If only the GitHub Release
+job fails after PyPI succeeded, re-run that job alone; PyPI does not accept the same
+files twice.
+
 ## Disclaimer
 
 This is an independent, unofficial project. It is not affiliated with, endorsed by,

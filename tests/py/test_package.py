@@ -1,3 +1,4 @@
+import re
 import unittest
 
 import agyscope
@@ -5,7 +6,9 @@ import agyscope
 
 class PackageTest(unittest.TestCase):
     def test_version(self):
-        self.assertEqual(agyscope.__version__, "0.2.2")
+        # __version__ is the single version source (pyproject reads it via hatch);
+        # releases are plain X.Y.Z with no pre-release suffix.
+        self.assertRegex(agyscope.__version__, r"^\d+\.\d+\.\d+$")
 
 
 if __name__ == "__main__":
