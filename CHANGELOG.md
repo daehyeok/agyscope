@@ -5,6 +5,15 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Added
+
+- `filter` action (`f` in both presets): filter the list by one or more row states from a
+  checklist (`a` checks all / none). Matching conversation and subagent rows are shown with their ancestors
+  (dimmed); a line names the active states or says "no rows match filter". The filter
+  lasts for the session only.
+
 ## [0.2.2] - 2026-11-17
 
 ### Added

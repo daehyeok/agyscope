@@ -252,6 +252,9 @@ def row_columns(row: dict, label_width: int, total_width: int, state_styles=None
     cells = {"role": (role, role_style(row, styles)), "state": (row["state"], styles.get(row["state"])),
              "model": (model if model and model != "-" else "", None),
              "age": (_short_age(row.get("age") or "", c["age"]), None), "text": (row.get("text") or "", None)}
+    if row.get("context"):  # shown only for a filtered-in descendant: every cell dimmed
+        dim = styles.get("dim")
+        cells = {col: (text, dim) for col, (text, _) in cells.items()}
     return _columns(cells, label_width, total_width, c, text_offset=text_offset)
 
 

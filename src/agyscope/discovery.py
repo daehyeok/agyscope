@@ -14,6 +14,7 @@ from .tasklog import TaskLogs
 from .transcript import Transcript, col_pad
 
 ACTIVE = ("working", "waiting", "quiet")
+FILTER_STATES = ("working", "waiting", "quiet", "done", "error")  # the states the list can be filtered by
 
 
 def transcript_path(app_dir, conv_id):
@@ -252,6 +253,38 @@ class Forest:
 
 def flat(groups):
     return [r for _, rows in groups for r in rows]
+
+
+def filter_groups(groups, states):
+    """groups narrowed to rows (conversation or subagent) whose state is in states, plus
+    their ancestors.
+
+    An ancestor kept only for a matching descendant is a copy marked "context": True. Group membership and order are
+    unchanged; an empty states, or every one of FILTER_STATES, is no filter.
+    """
+    states = set(states)
+    if not states or states >= set(FILTER_STATES):
+        return groups
+    out = []
+    for name, rows in groups:
+        by_id = {r["id"]: r for r in rows}
+        keep, context = set(), set()
+        for r in rows:
+            if r["state"] in states:
+                keep.add(r["id"])
+                parent = r.get("parent")
+                while parent in by_id and parent not in keep and parent not in context:
+                    context.add(parent)
+                    parent = by_id[parent].get("parent")
+        context -= keep
+        out.append((name, [dict(r, context=True) if r["id"] in context else r
+                           for r in rows if r["id"] in keep or r["id"] in context]))
+    return out
+
+
+def matches(groups):
+    """True if any row is listed for its own state (not only as a matching row's ancestor)."""
+    return any(not r.get("context") for _, rows in groups for r in rows)
 
 
 def row_text(row):
