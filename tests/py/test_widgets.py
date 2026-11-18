@@ -281,6 +281,27 @@ class SubagentTreeTest(unittest.IsolatedAsyncioTestCase):
             self.assertEqual(tree.selected_id(), fx.PLANNER)  # nothing below: previous subagent
             self.assertEqual(pilot.app.posted[-1], ("selected", fx.PLANNER))
 
+    async def test_status_filter_keeps_structure_and_restores(self):
+        async with TreeHost().run_test(size=SIZE) as pilot:
+            tree = pilot.app.query_one(SubagentTree)
+            groups = fixture_groups()  # Planner waiting > Checker working; Reviewer done
+            tree.update_groups(groups)
+            tree.action("open")  # collapse Planner
+            tree.action("last")  # Reviewer
+            await pilot.pause()
+            tree.update_groups(discovery.filter_groups(groups, {"working"}))
+            await pilot.pause()
+            self.assertEqual(shape(tree.root), [("Working", [(fx.PLANNER, [(fx.CHECKER, [])])])])
+            self.assertEqual(tree.selected_id(), fx.PLANNER)  # Reviewer gone: nearest survivor
+            tree.update_groups(discovery.filter_groups(groups, {"done"}))
+            await pilot.pause()
+            self.assertEqual(shape(tree.root), [("Completed", [(fx.REVIEWER, [])])])
+            tree.update_groups(discovery.filter_groups(groups, set()))  # filter cleared
+            await pilot.pause()
+            self.assertEqual(shape(tree.root), FIXTURE_SHAPE)
+            self.assertEqual(tree.selected_id(), fx.REVIEWER)
+            self.assertFalse(find(tree.root, fx.PLANNER).is_expanded)  # fold state kept while hidden
+
     async def test_empty_groups_hidden(self):
         async with TreeHost().run_test(size=SIZE) as pilot:
             tree = pilot.app.query_one(SubagentTree)
@@ -575,6 +596,17 @@ class ColumnsTest(unittest.TestCase):
         self.assertEqual(span_style(wf_main, 0).color, Style(color="#666666").color)
         for label in (sub, wf, main, wf_main):  # the state cell keeps its state color
             self.assertEqual(span_style(label, state_at(label)), styles["waiting"])
+
+    def test_context_row_dimmed(self):
+        def span_style(label, at):
+            return next((s.style for s in label.spans if s.start <= at < s.end), None)
+        row = dict(ROLE_ROW, model="pro", text="last step")
+        ctx = row_columns(dict(row, context=True), 18, 120, FALLBACK_STYLES)
+        for word in ("Planner", "waiting", "pro", "last step"):
+            self.assertEqual(span_style(ctx, ctx.plain.index(word)), FALLBACK_STYLES["dim"], word)
+        match = row_columns(row, 18, 120, FALLBACK_STYLES)
+        self.assertEqual(span_style(match, match.plain.index("waiting")), FALLBACK_STYLES["waiting"])
+        self.assertIsNone(span_style(match, 0))
 
     def test_narrow_drops_columns(self):
         every = ("role", "state", "model", "age", "text")

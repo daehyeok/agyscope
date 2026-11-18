@@ -21,6 +21,14 @@ class KeymapTest(unittest.TestCase):
         self.assertEqual(vi["a"], "fold_all")  # vim keeps a for fold all
         self.assertEqual(set(keymap.CONVERSATION_ACTIONS) - set(keymap.ACTIONS), set())
 
+    def test_filter_key(self):
+        for preset in ("emacs", "vim"):
+            self.assertEqual(keymap.build(preset)["f"], "filter", preset)
+        self.assertEqual(keymap.where("filter"), "list")
+        km = keymap.build("emacs", {"filter": "F"})
+        self.assertEqual(km["F"], "filter")
+        self.assertEqual(km["f"], "filter")  # the preset key stays too
+
     def test_pane_actions_removed(self):
         for action in ("focus_next", "toggle_sidebar"):
             self.assertNotIn(action, keymap.ACTIONS)

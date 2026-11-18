@@ -8,7 +8,7 @@ Key names:
 
 Actions:
   up down page_up page_down first last open fold_all pager back close help
-  toggle_main attach attach_under detach   (list screen only)
+  toggle_main attach attach_under detach filter   (list screen only)
 
 Keys in ALWAYS work in every preset (``?`` opens the key help). A preset adds its own keys, and user keys
 (``keys`` setting: action -> key or list of keys) are added last, so a user key
@@ -23,8 +23,8 @@ import string
 
 ACTIONS = ("up", "down", "page_up", "page_down", "first", "last",
            "open", "fold_all", "pager", "back", "close", "help",
-           "toggle_main", "attach", "attach_under", "detach")
-CONVERSATION_ACTIONS = ("toggle_main", "attach", "attach_under", "detach")  # list screen only
+           "toggle_main", "attach", "attach_under", "detach", "filter")
+CONVERSATION_ACTIONS = ("toggle_main", "attach", "attach_under", "detach", "filter")  # list screen only
 
 # Action -> what it does, for the key help dialog.
 DESCRIPTIONS = {
@@ -36,6 +36,7 @@ DESCRIPTIONS = {
     "close": "list: exit; view: back to the list", "help": "show this key help",
     "toggle_main": "hide/show conversation rows", "attach": "attach a conversation",
     "attach_under": "attach under the highlighted conversation", "detach": "detach the highlighted row",
+    "filter": "list: filter rows by state",
 }
 
 NAMED = ("Up", "Down", "Left", "Right", "PgUp", "PgDn", "Home", "End",
@@ -53,12 +54,14 @@ PRESETS = {
         "first": ["M-<"], "last": ["M->"], "open": ["Tab"], "fold_all": ["M-a"],
         "pager": ["M-o", "o"], "back": ["C-g"], "close": ["q"],
         "toggle_main": ["m"], "attach": ["a"], "attach_under": ["A"], "detach": ["d"],
+        "filter": ["f"],
     },
     "vim": {
         "up": ["k"], "down": ["j"], "page_up": ["C-u", "C-b"], "page_down": ["C-d", "C-f"],
         "first": ["g"], "last": ["G"], "open": ["Space"], "fold_all": ["a"],
         "pager": ["o"], "back": ["Esc"], "close": ["q"],
         "toggle_main": ["m"], "attach": ["i"], "attach_under": ["I"], "detach": ["x"],
+        "filter": ["f"],
     },
 }
 

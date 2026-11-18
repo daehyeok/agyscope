@@ -236,6 +236,7 @@ clicking an item's header toggles its fold.
 | `attach` (list: pick a conversation to watch) | | `a` | `i` |
 | `attach_under` (list: pick one to attach under the highlighted conversation) | | `A` | `I` |
 | `detach` (list: hide the highlighted row) | | `d` | `x` |
+| `filter` (list: filter rows by state) | | `f` | `f` |
 
 Note: Textual reports `Esc` followed by `<` or `>` as plain `<` and `>`, so `M-<` and
 `M->` are bound to `<` and `>` as well (either key works). In the view screen, `q`
@@ -263,6 +264,17 @@ These are the states:
 | `done` | ended its turn |
 | `quiet` | not finished, and its transcript hasn't changed for 5 minutes |
 | `error` | its last step failed or is an error message (a failed tool call alone is not an error) |
+
+**Filtering by state.** Press `f` on the list screen to pick one or more states from a
+checklist (`Space` toggles a state, `a` (or `A`) checks all or, when all are checked, none,
+`Enter` applies, `Esc` cancels). The list then shows
+only rows (conversations and subagents) in those states, plus the rows above each match
+(dimmed) so you can see where it sits in its tree; a conversation with nothing matching
+disappears. The Working and Completed groups are decided as without a filter. A line
+under the column titles names the active states and says `no rows match filter` when no
+row matches. Checking
+every state, or none, turns the filter off. A view you have open stays open when its
+row is filtered out. The filter lasts until agyscope exits.
 
 **Columns.** The list formats each subagent row into aligned columns:
 

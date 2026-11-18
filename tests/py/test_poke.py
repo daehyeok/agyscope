@@ -27,6 +27,30 @@ def short_state():
     return tempfile.mkdtemp(dir="/tmp")
 
 
+def ping(path):
+    """One raw ping on path (doesn't poke); raises OSError while the listener isn't accepting."""
+    s = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+    try:
+        s.settimeout(2)
+        s.connect(path)
+        s.sendall(b'{"op":"ping"}\n')
+        return json.loads(s.recv(4096))
+    finally:
+        s.close()
+
+
+async def wait_listening(path, timeout=3):
+    """Waits until the listener answers. The socket file appears at bind(), before listen(),
+    so a connect in between is refused (seen on macOS CI)."""
+    with anyio.fail_after(timeout):
+        while True:
+            try:
+                await anyio.to_thread.run_sync(ping, path)
+                return
+            except (FileNotFoundError, ConnectionRefusedError):
+                await anyio.sleep(0.01)
+
+
 class PokeTest(unittest.IsolatedAsyncioTestCase):
     async def test_listener_answers_wakes_and_cleans_up(self):
         state = short_state()
@@ -35,9 +59,7 @@ class PokeTest(unittest.IsolatedAsyncioTestCase):
         run = poke.service(path, shown=lambda: {"M", "W"})
         async with anyio.create_task_group() as tg:
             tg.start_soon(run, col)
-            with anyio.fail_after(3):
-                while not os.path.exists(path):
-                    await anyio.sleep(0.01)
+            await wait_listening(path)
             self.assertEqual(os.stat(path).st_mode & 0o777, 0o600)
             reached = await anyio.to_thread.run_sync(poke.notify, state)
             self.assertEqual(reached, [{"M", "W"}])
@@ -54,9 +76,7 @@ class PokeTest(unittest.IsolatedAsyncioTestCase):
         col = FakeCollector()
         async with anyio.create_task_group() as tg:
             tg.start_soon(poke.service(path, shown=set), col)
-            with anyio.fail_after(3):
-                while not os.path.exists(path):
-                    await anyio.sleep(0.01)
+            await wait_listening(path)
 
             def raw(payload):
                 s = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)

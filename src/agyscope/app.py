@@ -16,7 +16,7 @@ from textual.app import App, InvalidThemeError, SuspendNotSupported
 from textual.binding import Binding
 from textual.fuzzy import Matcher
 from textual.screen import ModalScreen, Screen
-from textual.widgets import Input, OptionList, Static
+from textual.widgets import Input, OptionList, SelectionList, Static
 from textual.widgets.option_list import Option
 
 from . import config, discovery, keymap, pager, textview, themes
@@ -41,6 +41,7 @@ class ListScreen(Screen):
 
     def compose(self):
         yield ColumnHeader(id="colhead")
+        yield Static(id="filterbar")
         yield Static(id="empty")
         yield SubagentTree(id="tree", state_styles=self.app.state_styles, cols=self.app.settings["columns"],
                            start_folded=self.app.settings["tree_fold"] == "fold")
@@ -85,7 +86,7 @@ class ListScreen(Screen):
             colhead.cancel_drag()
 
     def action(self, name: str) -> None:
-        """close exits with True, open views the row under the cursor, help/toggle_main/attach/
+        """close exits with True, open views the row under the cursor, help/toggle_main/filter/attach/
         attach_under/detach go to the app; the rest go to the tree."""
         tree = self.query_one("#tree", SubagentTree)
         sid = tree.selected_id()
@@ -99,6 +100,8 @@ class ListScreen(Screen):
             self.app.open_view(sid)
         elif name == "toggle_main":
             self.app.toggle_main()
+        elif name == "filter":
+            self.app.open_filter()
         elif name in ("attach", "attach_under"):
             self.app.open_picker(under=sid if name == "attach_under" else None)
         elif name == "detach":
@@ -219,6 +222,57 @@ class PickerScreen(ModalScreen):
         self.dismiss(None)
 
 
+class StatusFilterScreen(ModalScreen):
+    """Checklist of row states to filter the list by, several at once.
+
+    Dismisses with the set of checked states (Enter), or None on Esc.
+    """
+
+    DEFAULT_CSS = """
+    StatusFilterScreen { align: center middle; }
+    #statusfilter { width: auto; min-width: 40; height: auto; border: round $accent; background: $surface; }
+    #filterhint { height: 1; background: $panel; }
+    #filterlist { width: auto; height: auto; }
+    /* Textual's unchecked X ($panel-darken-2) vanishes on dark panels: keep it faint but visible */
+    #filterlist > .selection-list--button,
+    #filterlist > .selection-list--button-highlighted { color: $text-muted; }
+    """
+    BINDINGS = [
+        Binding("enter", "apply", show=False, priority=True),
+        Binding("escape,ctrl+g", "cancel", show=False, priority=True),
+        Binding("a,A", "toggle_all", show=False, priority=True),
+    ]
+
+    def __init__(self, selected) -> None:
+        super().__init__()
+        self.selected = set(selected)
+
+    def compose(self):
+        from textual.containers import Vertical
+        with Vertical(id="statusfilter"):
+            yield Static(Text(" Filter by state  Space toggle  a all/none  Enter apply  Esc cancel"), id="filterhint")
+            yield SelectionList(*((s, s, s in self.selected) for s in discovery.FILTER_STATES), id="filterlist")
+
+    def on_mount(self) -> None:
+        sel = self.query_one("#filterlist", SelectionList)
+        sel.highlighted = 0
+        sel.focus()
+
+    def action_toggle_all(self) -> None:
+        """Checks every state, or unchecks them all when every one is already checked."""
+        sel = self.query_one("#filterlist", SelectionList)
+        if len(sel.selected) == len(discovery.FILTER_STATES):
+            sel.deselect_all()
+        else:
+            sel.select_all()
+
+    def action_apply(self) -> None:
+        self.dismiss(set(self.query_one("#filterlist", SelectionList).selected))
+
+    def action_cancel(self) -> None:
+        self.dismiss(None)
+
+
 def help_text(keys: dict) -> Text:
     """Every action with its keys in `keys` (key name -> action), where it works and what it does,
     then the mouse actions."""
@@ -276,6 +330,7 @@ class AgyscopeApp(App):
     CSS = """
     #colhead { height: 1; text-style: bold; }
     #empty { height: 1; color: $text-muted; }
+    #filterbar { height: 1; color: $warning; display: none; }
     #tree { height: 1fr; }
     #steps { height: 1fr; }
     #status { height: 1; color: $error; text-style: bold; }
@@ -292,6 +347,7 @@ class AgyscopeApp(App):
         self.sources = sources
         self.settings = {**copy.deepcopy(config.DEFAULTS), **settings}
         self.show_main = bool(self.settings["main_rows"])
+        self.status_filter = set()  # row states the list shows (empty: all); this session only
         self._dbs = {}  # data directory -> AgentDB, for the picker
         self.clock = clock
         self.themes_dir = themes_dir
@@ -385,8 +441,10 @@ class AgyscopeApp(App):
         tree = self.list_screen.query_one("#tree", SubagentTree)
         self.agents.update(self.sources.roots)
         groups = self.agents.rows(now=self.clock(), show_main=self.show_main)
-        self.rows = {r["id"]: r for r in discovery.flat(groups)}
-        tree.update_groups(groups)
+        self.rows = {r["id"]: r for r in discovery.flat(groups)}  # unfiltered: the view keeps its row
+        shown = discovery.filter_groups(groups, self.status_filter)
+        tree.update_groups(shown)
+        self.show_filterbar(shown)
         empty = self.list_screen.query_one("#empty", Static)
         empty.display = not self.rows
         empty.update(" " + (StepView.NO_SUBAGENTS if self.agents.roots else StepView.NO_CONVERSATION))
@@ -414,6 +472,26 @@ class AgyscopeApp(App):
         row = self.rows.get(screen.row_id) if steps is not None else None
         if row is not None:
             steps.show(row, self.agents.items(row), self.views.setdefault(screen.row_id, ViewState()))
+
+    def show_filterbar(self, shown) -> None:
+        """Names the filtered states (hidden when off) and says when no subagent row matches."""
+        bar = self.list_screen.query_one("#filterbar", Static)
+        bar.display = bool(self.status_filter)
+        if self.status_filter:
+            text = " filter: " + ", ".join(s for s in discovery.FILTER_STATES if s in self.status_filter)
+            if not discovery.matches(shown):
+                text += " \u2014 no rows match filter"
+            bar.update(Text(text))
+
+    def open_filter(self) -> None:
+        self.push_screen(StatusFilterScreen(self.status_filter), callback=self._filtered)
+
+    def _filtered(self, states) -> None:
+        if states is None:
+            return
+        states = set(states)
+        self.status_filter = set() if states >= set(discovery.FILTER_STATES) else states
+        self.refresh_data()
 
     def toggle_main(self) -> None:
         self.show_main = not self.show_main

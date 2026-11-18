@@ -24,6 +24,7 @@ if HAVE_TEXTUAL:
     # outside the try: a missing app module must fail, not skip
     from agyscope import app as app_mod
     from agyscope.app import AgyscopeApp, ListScreen, ViewScreen
+    from textual.color import Color
     from agyscope.widgets import (MARQUEE_PAUSE_TICKS, StepView, SubagentTree, header_columns,
                                   marquee_span, marquee_window, text_width)
 
@@ -477,6 +478,153 @@ class MarqueeAppTest(unittest.IsolatedAsyncioTestCase):
                 planner = find(tree.root, fx.PLANNER)
                 self.assertTrue(await wait_until(pilot, lambda: tree._marquee_offset > 0))
                 self.assertNotIn("…", planner.label.plain)
+
+
+@unittest.skipUnless(HAVE_TEXTUAL, "textual not installed")
+class StatusFilterTest(unittest.IsolatedAsyncioTestCase):
+    # Fixture: Planner (waiting) > Checker (working); Reviewer (done). FILTER_STATES order:
+    # 0 working, 1 waiting, 2 quiet, 3 done, 4 error.
+
+    async def open_filter(self, pilot, app):
+        await pilot.press("f")
+        await pilot.pause()
+        self.assertIsInstance(app.screen, app_mod.StatusFilterScreen)
+        return app.screen.query_one("#filterlist", app_mod.SelectionList)
+
+    async def toggle(self, pilot, sel, index):
+        sel.highlighted = index
+        await pilot.press("space")
+        await pilot.pause()
+
+    async def test_pick_two_states_and_apply(self):
+        app = make_app()
+        async with app.run_test(size=SIZE) as pilot:
+            tree = await start(pilot, app)
+            sel = await self.open_filter(pilot, app)
+            self.assertEqual(list(sel.selected), [])
+            await pilot.press("space")  # the first state, working, is highlighted on open
+            await self.toggle(pilot, sel, 3)  # done
+            await pilot.press("enter")
+            await pilot.pause()
+            self.assertIsInstance(app.screen, ListScreen)
+            self.assertEqual(app.status_filter, {"working", "done"})
+            self.assertEqual(shape(tree.root), FIXTURE_SHAPE)  # Planner kept as Checker's parent
+            self.assertTrue(tree._rows[fx.PLANNER].get("context"))
+            self.assertFalse(tree._rows[fx.CHECKER].get("context"))
+            bar = app.query_one("#filterbar")
+            self.assertTrue(bar.display)
+            self.assertEqual(text_of(bar), " filter: working, done")
+
+    async def test_reopen_shows_current_and_cancel_keeps(self):
+        app = make_app()
+        async with app.run_test(size=SIZE) as pilot:
+            tree = await start(pilot, app)
+            app._filtered({"done"})
+            await pilot.pause()
+            self.assertEqual(shape(tree.root), [("Completed", [(fx.REVIEWER, [])])])
+            sel = await self.open_filter(pilot, app)
+            self.assertEqual(list(sel.selected), ["done"])
+            await self.toggle(pilot, sel, 4)  # error, then cancel
+            await pilot.press("escape")
+            await pilot.pause()
+            self.assertIsInstance(app.screen, ListScreen)
+            self.assertEqual(app.status_filter, {"done"})
+
+    async def test_all_or_none_clears(self):
+        app = make_app()
+        async with app.run_test(size=SIZE) as pilot:
+            tree = await start(pilot, app)
+            app._filtered({"done"})
+            await pilot.pause()
+            sel = await self.open_filter(pilot, app)
+            await self.toggle(pilot, sel, 3)  # uncheck done
+            await pilot.press("enter")
+            await pilot.pause()
+            self.assertEqual(app.status_filter, set())
+            self.assertEqual(shape(tree.root), FIXTURE_SHAPE)
+            self.assertFalse(app.query_one("#filterbar").display)
+            self.assertFalse(any(r.get("context") for r in tree._rows.values()))
+            app._filtered(set(discovery.FILTER_STATES))
+            self.assertEqual(app.status_filter, set())
+
+    async def test_no_rows_match_hides_conversation(self):
+        app = make_app(settings=dict(SETTINGS, main_rows=True))
+        async with app.run_test(size=SIZE) as pilot:
+            tree = await start(pilot, app)
+            app._filtered({"error"})
+            await pilot.pause()
+            self.assertEqual(shape(tree.root), [])  # nothing in the conversation's tree is error
+            self.assertEqual(text_of(app.query_one("#filterbar")), " filter: error \u2014 no rows match filter")
+            self.assertFalse(app.query_one("#empty").display)  # the bar says it; no second empty line
+
+    async def test_conversation_rows_filtered_by_state(self):
+        app = make_app(settings=dict(SETTINGS, main_rows=True))
+        async with app.run_test(size=SIZE) as pilot:
+            tree = await start(pilot, app)
+            main_state = app.rows[fx.ROOT]["state"]
+            app._filtered({"working"})  # Checker is working: conversation and Planner kept dimmed
+            await pilot.pause()
+            self.assertEqual(shape(tree.root), [("Working", [(fx.ROOT, [(fx.PLANNER, [(fx.CHECKER, [])])])])])
+            self.assertEqual(bool(tree._rows[fx.ROOT].get("context")), main_state != "working")
+            self.assertTrue(tree._rows[fx.PLANNER].get("context"))
+            app._filtered({main_state})  # the conversation row matches itself
+            await pilot.pause()
+            self.assertFalse(tree._rows[fx.ROOT].get("context"))
+
+    async def test_shift_a_toggles_all(self):
+        app = make_app()
+        async with app.run_test(size=SIZE) as pilot:
+            await start(pilot, app)
+            sel = await self.open_filter(pilot, app)
+            await pilot.press("space")  # one checked: A checks the rest
+            await pilot.press("A")
+            await pilot.pause()
+            self.assertEqual(list(sel.selected), list(discovery.FILTER_STATES))
+            await pilot.press("a")  # lowercase works too; all checked: unchecks all
+            await pilot.pause()
+            self.assertEqual(list(sel.selected), [])
+            await pilot.press("A")
+            await self.toggle(pilot, sel, 4)  # all but error
+            await pilot.press("enter")
+            await pilot.pause()
+            self.assertEqual(app.status_filter, {"working", "waiting", "quiet", "done"})
+
+    async def test_unchecked_box_visible(self):
+        app = make_app()
+        async with app.run_test(size=SIZE) as pilot:
+            await start(pilot, app)
+            sel = await self.open_filter(pilot, app)
+            style = sel.get_component_rich_style("selection-list--button")
+            textual_default = Color.parse(app.get_css_variables()["panel-darken-2"]).rich_color
+            self.assertNotEqual(style.color, textual_default)  # Textual's near-invisible X replaced
+            self.assertNotEqual(style.color, style.bgcolor)
+
+    async def test_filter_key_does_nothing_in_view(self):
+        app = make_app()
+        async with app.run_test(size=SIZE) as pilot:
+            await start(pilot, app)
+            await open_view(pilot, app, downs=1)
+            await pilot.press("f")
+            await pilot.pause()
+            self.assertIsInstance(app.screen, ViewScreen)
+
+    async def test_view_stays_open_when_row_filtered_out(self):
+        app = make_app()
+        async with app.run_test(size=SIZE) as pilot:
+            tree = await start(pilot, app)
+            await open_view(pilot, app, downs=1)  # Checker (working)
+            app._filtered({"done"})
+            await pilot.pause()
+            app.refresh_data()
+            await pilot.pause()
+            self.assertIsInstance(app.screen, ViewScreen)
+            self.assertEqual(app.screen.row_id, fx.CHECKER)
+            self.assertIsNone(find(tree.root, fx.CHECKER))
+
+    async def test_session_only(self):
+        app = make_app()
+        self.assertEqual(app.status_filter, set())
+        self.assertNotIn("status_filter", app.settings)
 
 
 @unittest.skipUnless(HAVE_TEXTUAL, "textual not installed")

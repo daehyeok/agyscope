@@ -253,3 +253,58 @@ class ForestTest(unittest.TestCase):
         f.update([Root(OTHER, self.app, "live"), Root(fx.ROOT, self.app, "pane")])
         working = f.rows(now=NOW)[0][1]
         self.assertEqual([r["id"] for r in working if r["main"]], [fx.ROOT, OTHER])
+
+
+def frow(rid, state, parent=None, main=False):
+    return {"id": rid, "state": state, "parent": parent, "main": main, "depth": 0}
+
+
+class FilterGroupsTest(unittest.TestCase):
+    GROUPS = [
+        ("Working", [frow("A", "working", main=True), frow("planner", "done", "A"),
+                     frow("impl", "error", "planner"), frow("rev", "done", "planner"),
+                     frow("busy", "working", "A")]),
+        ("Completed", [frow("B", "done", main=True), frow("b1", "done", "B")]),
+    ]
+
+    def shown(self, groups):
+        return [(name, [(r["id"], bool(r.get("context"))) for r in rows]) for name, rows in groups]
+
+    def test_match_nested_under_non_matching_parent(self):
+        out = discovery.filter_groups(self.GROUPS, {"error"})
+        self.assertEqual(self.shown(out), [
+            ("Working", [("A", True), ("planner", True), ("impl", False)]),
+            ("Completed", []),  # conversation B: nothing in its tree matches
+        ])
+
+    def test_non_matching_subtree_hidden_and_multi_select(self):
+        out = discovery.filter_groups(self.GROUPS, {"error", "working"})
+        self.assertEqual(self.shown(out)[0][1], [("A", False), ("planner", True), ("impl", False), ("busy", False)])
+
+    def test_conversation_row_matches_itself(self):
+        groups = [("Working", [frow("C1", "working", main=True)]), ("Completed", [frow("C2", "done", main=True)])]
+        self.assertEqual(self.shown(discovery.filter_groups(groups, {"working"})),
+                         [("Working", [("C1", False)]), ("Completed", [])])
+
+    def test_group_kept_as_decided_before_filtering(self):
+        # A's tree is under Working (busy is working); filtering to done keeps it there.
+        out = discovery.filter_groups(self.GROUPS, {"done"})
+        self.assertEqual(self.shown(out)[0][1], [("A", True), ("planner", False), ("rev", False)])
+        self.assertEqual(self.shown(out)[1][1], [("B", False), ("b1", False)])
+
+    def test_all_or_none_is_no_filter(self):
+        self.assertIs(discovery.filter_groups(self.GROUPS, set()), self.GROUPS)
+        self.assertIs(discovery.filter_groups(self.GROUPS, set(discovery.FILTER_STATES)), self.GROUPS)
+
+    def test_input_rows_not_mutated(self):
+        discovery.filter_groups(self.GROUPS, {"error"})
+        self.assertFalse(any("context" in r for _, rows in self.GROUPS for r in rows))
+
+    def test_matches(self):
+        self.assertTrue(discovery.matches(discovery.filter_groups(self.GROUPS, {"error"})))
+        self.assertFalse(discovery.matches(discovery.filter_groups(self.GROUPS, {"quiet"})))
+
+    def test_without_main_rows(self):
+        groups = [("Completed", [frow("p", "done"), frow("c", "error", "p"), frow("q", "done")])]
+        self.assertEqual(self.shown(discovery.filter_groups(groups, {"error"})),
+                         [("Completed", [("p", True), ("c", False)])])
