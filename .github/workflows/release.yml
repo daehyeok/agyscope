@@ -1,0 +1,145 @@
+name: release
+
+# Push a vX.Y.Z tag on a release prep commit (see README "Releasing").
+on:
+  push:
+    tags: ["v*.*.*"]
+
+permissions:
+  contents: read
+
+# Must differ from test.yml's group: a called workflow evaluates
+# `${{ github.workflow }}-${{ github.ref }}` as "release-<ref>".
+concurrency:
+  group: publish-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    outputs:
+      version: ${{ steps.check.outputs.version }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Check tag, version and CHANGELOG
+        id: check
+        shell: python
+        run: |
+          import os, pathlib, re, sys
+
+          tag = os.environ["GITHUB_REF_NAME"]
+          init = pathlib.Path("src/agyscope/__init__.py").read_text()
+          m = re.search(r"""^__version__\s*=\s*["']([^"']+)["']""", init, re.M)
+          if not m:
+              print("::error::no __version__ in src/agyscope/__init__.py")
+              sys.exit(1)
+          version = m.group(1)
+
+          # Split CHANGELOG.md into {heading label: body} on "## [label]" lines.
+          sections, label, body = {}, None, []
+          for line in pathlib.Path("CHANGELOG.md").read_text().splitlines():
+              h = re.match(r"^## \[([^\]]+)\]", line)
+              if h or line.startswith("## "):
+                  if label is not None:
+                      sections[label] = "\n".join(body).strip("\n")
+                  label, body = (h.group(1) if h else None), []
+              elif label is not None:
+                  body.append(line)
+          if label is not None:
+              sections[label] = "\n".join(body).strip("\n")
+
+          errors = []
+          if tag != f"v{version}":
+              errors.append(f"tag {tag} does not match package version {version} (expected v{version})")
+          if version not in sections:
+              errors.append(f"CHANGELOG.md has no '## [{version}]' section")
+          unreleased = [
+              l for l in sections.get("Unreleased", "").splitlines()
+              if l.strip() and not l.startswith("### ")
+          ]
+          if unreleased:
+              errors.append("CHANGELOG.md '## [Unreleased]' still has entries; move them into the release section")
+          for e in errors:
+              print(f"::error::{e}")
+          if errors:
+              sys.exit(1)
+
+          pathlib.Path("notes.md").write_text(sections[version] + "\n")
+          with open(os.environ["GITHUB_OUTPUT"], "a") as out:
+              out.write(f"version={version}\n")
+          print(f"releasing {version}")
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: notes
+          path: notes.md
+          if-no-files-found: error
+
+  test:
+    uses: ./.github/workflows/test.yml
+    permissions:
+      contents: read
+
+  build:
+    needs: [verify, test]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: astral-sh/setup-uv@d4b2f3b6ecc6e67c4457f6d3e41ec42d3d0fcb86 # v5.4.2
+      - name: Build sdist and wheel
+        run: uv build
+      - name: Check built version matches __version__
+        env:
+          VERSION: ${{ needs.verify.outputs.version }}
+        run: |
+          ls dist
+          test -f "dist/agyscope-${VERSION}.tar.gz"
+          test -f "dist/agyscope-${VERSION}-py3-none-any.whl"
+          set -- dist/*
+          test "$#" -eq 2
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: dist
+          path: dist/
+          if-no-files-found: error
+
+  publish-pypi:
+    needs: [verify, build]
+    runs-on: ubuntu-latest
+    environment:
+      name: pypi
+      url: https://pypi.org/project/agyscope/${{ needs.verify.outputs.version }}/
+    permissions:
+      id-token: write # PyPI Trusted Publishing (OIDC); no stored token
+    steps:
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: dist
+          path: dist/
+      - uses: pypa/gh-action-pypi-publish@7245906fb61fa33a13554f9d5fb856fe61758086 # v1.14.3
+
+  github-release:
+    needs: [verify, publish-pypi]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: dist
+          path: dist/
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: notes
+      - name: Create GitHub Release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+        run: >-
+          gh release create "$GITHUB_REF_NAME" dist/*
+          --title "$GITHUB_REF_NAME"
+          --notes-file notes.md
+          --verify-tag

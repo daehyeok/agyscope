@@ -13,11 +13,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   checklist (`a` checks all / none). Matching conversation and subagent rows are shown with their ancestors
   (dimmed); a line names the active states or says "no rows match filter". The filter
   lasts for the session only.
-
-## [0.2.2] - 2026-11-17
-
-### Added
-
 - Several conversations in one panel: the pane's conversation first, then `--conversation`
   ids (now repeatable), top-level attachments and, with the new `live` setting (default
   on; `--no-live`), every running agent on the host, found from held presence locks. A
@@ -42,10 +37,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `tree_fold` setting (`"unfold"` by default, or `"fold"`; `--tree-fold`): how list rows
   with children first appear. Folds you change are kept across refreshes.
 
-### Removed
-
-- **Breaking (UI):** the key hint rows on the list and view screens. Press `?` instead.
-
 ### Changed
 
 - **BREAKING:** with `live` on by default, every pane's panel also lists the other running
@@ -55,11 +46,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Source collection (`lsof`, `/proc`) runs in the background with AnyIO (new dependency)
   instead of on the UI thread; a hung `lsof` is killed after 2 seconds.
 
+### Removed
+
+- **Breaking (UI):** the key hint rows on the list and view screens. Press `?` instead.
+
 ### Fixed
 
 - The list now uses the theme's state colors from the start in a real terminal; before, it
   kept the fallback colors until the theme was switched.
-
 
 ## [0.2.1] - 2026-11-16
 
